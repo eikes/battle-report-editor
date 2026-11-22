@@ -1,0 +1,5 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="-10 -10 20 20">
+  <title>Rock</title>
+  <polygon points="9,-1.97 3.25,7.46 -6.3,6.13 -6.49,-7.46 0.65,-9.46" fill="#a3a8aa" stroke="#3b4042" stroke-width="1.6" stroke-linejoin="round"/>
+  <polygon points="3.45,-3.09 0.29,2.1 -4.97,1.37 -5.07,-6.11 -1.14,-7.2" fill="#cdd1d2"/>
+</svg>

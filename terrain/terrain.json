@@ -1,0 +1,28 @@
+{
+  "_about": "Terrain artwork. buildings/: drawn at their default size and stretched to the size you place. sprites/: single pieces the editor scatters across woods, rock fields, cacti and crystal fields; several files for one sprite give random variety, and top-level groups marked data-layer=\"...\" are drawn layer by layer across all pieces (so tree canopies merge).",
+  "buildings": [
+    "generator",
+    "landing",
+    "cathedral"
+  ],
+  "sprites": {
+    "tree": [
+      "tree"
+    ],
+    "rock": [
+      "rock-1",
+      "rock-2",
+      "rock-3"
+    ],
+    "cactus": [
+      "cactus-1",
+      "cactus-2"
+    ],
+    "crystal-shard": [
+      "crystal-shard"
+    ],
+    "crystal-core": [
+      "crystal-core"
+    ]
+  }
+}

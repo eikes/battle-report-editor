@@ -1,0 +1,5 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="-10 -10 20 20">
+  <title>Crystal core</title>
+  <polygon points="8.78,4.79 0.24,10 -8.54,5.2 -8.78,-4.79 -0.24,-10 8.54,-5.2" fill="#5cc2ff" stroke="#0c2b5e" stroke-width="1.6"/>
+  <path d="M-2,-8.5L-0.92,-3.58L4,-2.5L-0.92,-1.42L-2,3.5L-3.08,-1.42L-8,-2.5L-3.08,-3.58Z" fill="#ffffff" opacity=".9"/>
+</svg>

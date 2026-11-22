@@ -1,0 +1,83 @@
+{
+  "_about": "Picker groups and order. Each name is a file in this folder (name.svg). The \"hidden\" group is not shown in the picker but still renders in older projects.",
+  "groups": [
+    {
+      "id": "unit",
+      "title": "Unit symbols",
+      "symbols": [
+        "tank",
+        "tankheavy",
+        "tanktop",
+        "apc",
+        "gravtank",
+        "dreadnought",
+        "terminator",
+        "infantry",
+        "squad",
+        "skull",
+        "walker",
+        "artillery",
+        "heavy",
+        "bike",
+        "buggy",
+        "aircraft",
+        "airship",
+        "rocket",
+        "beast",
+        "star",
+        "crown",
+        "shield",
+        "flag",
+        "arrow",
+        "cross",
+        "bolt",
+        "eye",
+        "target"
+      ]
+    },
+    {
+      "id": "number",
+      "title": "Numbers & numerals",
+      "symbols": [
+        "n1",
+        "n2",
+        "n3",
+        "n4",
+        "n5",
+        "n6",
+        "n7",
+        "n8",
+        "n9",
+        "r1",
+        "r2",
+        "r3",
+        "r4",
+        "r5",
+        "r6",
+        "r7",
+        "r8",
+        "r9",
+        "r10"
+      ]
+    },
+    {
+      "id": "faction",
+      "title": "Faction symbols",
+      "symbols": [
+        "omega",
+        "blooddrop",
+        "wolf",
+        "tuskskull",
+        "goblin",
+        "fungus"
+      ]
+    },
+    {
+      "id": "hidden",
+      "title": null,
+      "symbols": [
+        "number1"
+      ]
+    }
+  ]
+}

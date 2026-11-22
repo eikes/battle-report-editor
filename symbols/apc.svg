@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24">
+  <title>Transport / APC</title>
+  <path d="M2 15h20l-2 4.5H4z M3.5 8.5h15l2.5 6.5H2z" fill="#141414"/>
+  <path data-layer="cut" d="M8 9.6h4.5v1.6H8zM4.8,17.2a1.2,1.2 0 1,0 2.4,0a1.2,1.2 0 1,0 -2.4,0ZM8.8,17.2a1.2,1.2 0 1,0 2.4,0a1.2,1.2 0 1,0 -2.4,0ZM12.8,17.2a1.2,1.2 0 1,0 2.4,0a1.2,1.2 0 1,0 -2.4,0ZM16.8,17.2a1.2,1.2 0 1,0 2.4,0a1.2,1.2 0 1,0 -2.4,0Z" fill="#ffffff"/>
+  <path d="M5 7h2.5v1.5H5z" fill="#141414"/>
+</svg>

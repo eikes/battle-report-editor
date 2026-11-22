@@ -1,0 +1,21 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="-110 -110 220 220" width="220" height="220">
+  <title>Landing platform</title>
+  <polygon points="105.69,43.78 43.78,105.69 -43.78,105.69 -105.69,43.78 -105.69,-43.78 -43.78,-105.69 43.78,-105.69 105.69,-43.78" transform="translate(5,5)" fill="#000000" opacity=".22"/>
+  <polygon points="105.69,43.78 43.78,105.69 -43.78,105.69 -105.69,43.78 -105.69,-43.78 -43.78,-105.69 43.78,-105.69 105.69,-43.78" fill="#4a4f56" stroke="#1d2025" stroke-width="3"/>
+  <ellipse rx="101.2" ry="101.2" fill="#8e959d" stroke="#2a2e33" stroke-width="2"/>
+  <path d="M68.2,0L101.2,0M63.01,26.1L93.5,38.73M48.22,48.22L71.56,71.56M26.1,63.01L38.73,93.5M0,68.2L0,101.2M-26.1,63.01L-38.73,93.5M-48.22,48.22L-71.56,71.56M-63.01,26.1L-93.5,38.73M-68.2,0L-101.2,0M-63.01,-26.1L-93.5,-38.73M-48.22,-48.22L-71.56,-71.56M-26.1,-63.01L-38.73,-93.5M0,-68.2L0,-101.2M26.1,-63.01L38.73,-93.5M48.22,-48.22L71.56,-71.56M63.01,-26.1L93.5,-38.73" stroke="#666d74" stroke-width="1.5"/>
+  <ellipse rx="68.2" ry="68.2" fill="none" stroke="#111111" stroke-width="7"/>
+  <ellipse rx="68.2" ry="68.2" fill="none" stroke="#ffd21f" stroke-width="7" stroke-dasharray="9 9"/>
+  <ellipse rx="61.6" ry="61.6" fill="#a7aeb5" stroke="#2a2e33" stroke-width="1.5"/>
+  <rect x="-34.1" y="-34.1" width="68.2" height="68.2" fill="none" stroke="#ffd21f" stroke-width="3" stroke-dasharray="8 5"/>
+  <circle r="22" fill="#ffffff" stroke="#111111" stroke-width="2"/>
+  <path d="M0,0L17.6,0A17.6,17.6 0 0,1 0,17.6ZM0,0L-17.6,0A17.6,17.6 0 0,1 0,-17.6Z" fill="#111111"/>
+  <circle cx="99.59" cy="41.25" r="3.85" fill="#7fd8ff" stroke="#0c2b5e" stroke-width="1"/>
+  <circle cx="41.25" cy="99.59" r="3.85" fill="#7fd8ff" stroke="#0c2b5e" stroke-width="1"/>
+  <circle cx="-41.25" cy="99.59" r="3.85" fill="#7fd8ff" stroke="#0c2b5e" stroke-width="1"/>
+  <circle cx="-99.59" cy="41.25" r="3.85" fill="#7fd8ff" stroke="#0c2b5e" stroke-width="1"/>
+  <circle cx="-99.59" cy="-41.25" r="3.85" fill="#7fd8ff" stroke="#0c2b5e" stroke-width="1"/>
+  <circle cx="-41.25" cy="-99.59" r="3.85" fill="#7fd8ff" stroke="#0c2b5e" stroke-width="1"/>
+  <circle cx="41.25" cy="-99.59" r="3.85" fill="#7fd8ff" stroke="#0c2b5e" stroke-width="1"/>
+  <circle cx="99.59" cy="-41.25" r="3.85" fill="#7fd8ff" stroke="#0c2b5e" stroke-width="1"/>
+</svg>

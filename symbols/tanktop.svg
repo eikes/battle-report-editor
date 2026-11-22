@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24">
+  <title>Tank seen from above</title>
+  <path d="M3 3h4v18H3z M17 3h4v18h-4z M7.6 5h8.8v14H7.6z" fill="#141414"/>
+  <path data-layer="cut" d="M7.4,13a4.6,4.6 0 1,0 9.2,0a4.6,4.6 0 1,0 -9.2,0ZM10.5 1.2h3v8h-3z" fill="#ffffff"/>
+  <path d="M8.5,13a3.5,3.5 0 1,0 7,0a3.5,3.5 0 1,0 -7,0ZM11.2 1.8h1.6v8h-1.6z" fill="#141414"/>
+</svg>

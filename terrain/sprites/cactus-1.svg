@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="-12 -12 24 24">
+  <title>Spiked cactus</title>
+  <polygon points="13.18,4.08 7.06,4.98 8.27,11.05 2.79,8.18 0.2,13.8 -2.55,8.25 -7.95,11.28 -6.92,5.18 -13.06,4.45 -8.64,0.12 -13.18,-4.08 -7.06,-4.98 -8.27,-11.05 -2.79,-8.18 -0.2,-13.8 2.55,-8.25 7.95,-11.28 6.92,-5.18 13.06,-4.45 8.64,-0.12" fill="#e0322a" stroke="#6e0d0d" stroke-width="1.2" stroke-linejoin="round"/>
+  <circle r="8.4" fill="#3f9a3a" stroke="#1b4f1c" stroke-width="1.3"/>
+  <path d="M0,0L7.34,2.27M0,0L4.6,6.15M0,0L0.11,7.68M0,0L-4.43,6.28M0,0L-7.27,2.48M0,0L-7.34,-2.27M0,0L-4.6,-6.15M0,0L-0.11,-7.68M0,0L4.43,-6.28M0,0L7.27,-2.48" stroke="#1f5e20" stroke-width="1.1" opacity=".85"/>
+  <circle cx="-2.4" cy="-2.64" r="2.4" fill="#8fd16a" opacity=".75"/>
+  <circle r="1.44" fill="#ff5a4a"/>
+</svg>

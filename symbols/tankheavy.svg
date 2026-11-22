@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24">
+  <title>Heavy tank (rhomboid tracks)</title>
+  <path d="M1.5 13L4.2 7.5h15.6l2.7 5.5-2.7 5.5H4.2z" fill="#141414"/>
+  <path data-layer="cut" d="M4.6 13l1.6-3.1h11.6l1.6 3.1-1.6 3.1H6.2z" fill="#ffffff"/>
+  <path d="M7.5 10.8h7v4.4h-7z M14.5 12.2h8.5v1.6h-8.5zM5.7,13a1,1 0 1,0 2,0a1,1 0 1,0 -2,0ZM16.3,13a1,1 0 1,0 2,0a1,1 0 1,0 -2,0Z" fill="#141414"/>
+</svg>

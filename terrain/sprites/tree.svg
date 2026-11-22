@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="-11 -11 22 22">
+  <title>Tree (wood)</title>
+  <g data-layer="outline" fill="#1b5a22" stroke="#1b5a22" stroke-width="3.4"><circle cx="0" cy="0" r="6.82"/><circle cx="-1.95" cy="-4.91" r="5.5"/><circle cx="4.06" cy="-3.37" r="5.5"/><circle cx="4.46" cy="2.82" r="5.5"/><circle cx="-1.31" cy="5.12" r="5.5"/><circle cx="-5.27" cy="0.34" r="5.5"/></g>
+  <g data-layer="fill" fill="#3dac3d"><circle cx="0" cy="0" r="6.82"/><circle cx="-1.95" cy="-4.91" r="5.5"/><circle cx="4.06" cy="-3.37" r="5.5"/><circle cx="4.46" cy="2.82" r="5.5"/><circle cx="-1.31" cy="5.12" r="5.5"/><circle cx="-5.27" cy="0.34" r="5.5"/></g>
+  <g data-layer="highlight" fill="#7fd35a" opacity=".85"><circle cx="-2.75" cy="-3.3" r="3.3"/></g>
+</svg>

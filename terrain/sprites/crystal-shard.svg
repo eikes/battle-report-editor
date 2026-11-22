@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 -8 50 16">
+  <title>Crystal shard (points right)</title>
+  <polygon points="0,-8 39,-8 50,0 39,8 0,8" fill="#2f86d8"/>
+  <polygon points="0,-8 39,-8 50,0 0,0" fill="#8fe0ff"/>
+  <polygon points="39,-8 50,0 39,8" fill="#d6f6ff" opacity=".75"/>
+  <polygon points="0,-8 39,-8 50,0 39,8 0,8" fill="none" stroke="#0c2b5e" stroke-width="1.6" stroke-linejoin="round"/>
+</svg>

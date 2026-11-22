@@ -1,0 +1,75 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Battle Report Map Editor</title>
+<link rel="stylesheet" href="css/editor.css">
+</head>
+<body>
+<header class="top">
+  <div class="brand">
+    <img src="icons/brand.svg" alt="">
+    Battle Report Editor
+  </div>
+  <div class="sep"></div>
+  <button id="bNew" title="New empty map">New</button>
+  <button id="bOpen" title="Open a saved project (.json)">Open</button>
+  <button id="bSave" title="Save project as .json (Ctrl+S)">Save</button>
+  <details class="menu" id="exportMenu">
+    <summary>Export ▾</summary>
+    <div class="items">
+      <div class="exopts"><span>Include:</span><label><input type="checkbox" id="exTitle" checked> Title</label><label><input type="checkbox" id="exLegend" checked> Legend</label><label><input type="checkbox" id="exMargin" checked> Page margin</label></div>
+      <button data-export="svg-round">SVG – current round<small>One map, layered (Background / Terrain / Round / Frame)</small></button>
+      <button data-export="svg-layers">SVG – all rounds as layers<small>Toggle rounds as layers in Inkscape / Illustrator</small></button>
+      <button data-export="svg-sheet">SVG – overview sheet<small>Every round side by side with a shared legend</small></button>
+      <button data-export="png-round">PNG – current round<small>2× resolution raster image</small></button>
+      <button data-export="png-sheet">PNG – overview sheet</button>
+    </div>
+  </details>
+  <div class="sep"></div>
+  <button id="bUndo" title="Undo (Ctrl+Z)">↶</button>
+  <button id="bRedo" title="Redo (Ctrl+Shift+Z)">↷</button>
+  <div class="sep"></div>
+  <div class="toggles">
+    <label title="Draw movement arrows for units that moved this round"><input type="checkbox" data-t="view" data-k="arrows"><span>Move arrows</span></label>
+    <label title="Also show earlier rounds' arrows faded"><input type="checkbox" data-t="view" data-k="trail"><span>Trail</span></label>
+    <label title="Show destroyed units as wrecks in later rounds"><input type="checkbox" data-t="view" data-k="wrecks"><span>Wrecks</span></label>
+    <label title="Faint copy of each unit at its previous-round position, in the editor. Per unit and round you can also choose Always (exported) or Never."><input type="checkbox" data-t="ui" data-k="ghosts"><span>Ghosts</span></label>
+    <label title="Make terrain unclickable while moving units"><input type="checkbox" data-t="ui" data-k="lockTerrain"><span>Lock terrain</span></label>
+  </div>
+  <div class="zoom">
+    <button id="zOut" title="Zoom out">−</button><span id="zLbl">100%</span><button id="zIn" title="Zoom in">+</button><button id="zFit" title="Fit to window">Fit</button>
+  </div>
+</header>
+
+<div class="main">
+  <nav class="tools" id="tools">
+    <button class="tool" data-tool="select" title="Select / move (V)"><img src="icons/tool-select.svg" alt="">Select<kbd>V</kbd></button>
+    <button class="tool" data-tool="unit" title="Place units (U)"><img src="icons/tool-unit.svg" alt="">Unit<kbd>U</kbd></button>
+    <button class="tool" data-tool="terrain" title="Place terrain (T)"><img src="icons/tool-terrain.svg" alt="">Terrain<kbd>T</kbd></button>
+    <button class="tool" data-tool="arrow" title="Draw arrows (A) – drag on the map"><img src="icons/tool-arrow.svg" alt="">Arrow<kbd>A</kbd></button>
+    <button class="tool" data-tool="callout" title="Callout text box (C)"><img src="icons/tool-callout.svg" alt="">Callout<kbd>C</kbd></button>
+    <button class="tool" data-tool="text" title="Map label (X)"><img src="icons/tool-text.svg" alt="">Label<kbd>X</kbd></button>
+    <button class="tool" data-tool="fire" title="Fire lines – bullets, lasers, plasma, magic (F). Drag from shooter to target"><img src="icons/tool-fire.svg" alt="">Fire<kbd>F</kbd></button>
+    <button class="tool" data-tool="effect" title="Explosions, psychic effects, objectives (E)"><img src="icons/tool-effect.svg" alt="">Effect<kbd>E</kbd></button>
+  </nav>
+
+  <section class="stage">
+    <div class="scroller" id="scroller"></div>
+    <div class="rounds" id="rounds"></div>
+  </section>
+
+  <aside class="panel" id="panel"></aside>
+</div>
+
+<input type="file" id="fileOpen" accept=".json,application/json" hidden>
+<input type="file" id="fileRef" accept="image/*" hidden>
+<input type="file" id="fileLogo" accept=".svg,image/svg+xml,image/png,image/jpeg,image/webp,image/gif" hidden>
+<input type="file" id="fileIcon" accept=".svg,image/svg+xml" multiple hidden>
+<input type="file" id="fileTer" accept=".svg,image/svg+xml" multiple hidden>
+<div class="toast" id="toast"></div>
+
+<script src="js/editor.js"></script>
+</body>
+</html>
