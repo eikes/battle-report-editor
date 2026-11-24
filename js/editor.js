@@ -307,8 +307,25 @@ function scatter(R, rx, ry, n, minD, margin) {
 }
 /* Area fill: woods, rock fields and cacti can follow an outline drawn on the map.
    t.area holds the outline as fractions of t.w / t.h (so resizing and rotating still work). */
-const AREA_TYPES = new Set(['wood', 'rocks', 'cacti']);
+const AREA_TYPES = new Set(['wood', 'rocks', 'cacti', 'crystal', 'marsh', 'hill', 'lake', 'crater']);
 const areaPoly = t => t.area.map(([u, v]) => [u * t.w, v * t.h]);
+function centroidOf(P) {
+  const A = polyArea(P); if (Math.abs(A) < 1e-6) return [P.reduce((a, p) => a + p[0], 0) / P.length, P.reduce((a, p) => a + p[1], 0) / P.length];
+  let cx = 0, cy = 0; P.forEach((p, i) => { const q = P[(i + 1) % P.length], c = p[0] * q[1] - q[0] * p[1]; cx += (p[0] + q[0]) * c; cy += (p[1] + q[1]) * c; });
+  return [cx / (6 * A), cy / (6 * A)];
+}
+// Smooth outline of a drawn area, optionally shrunk towards its centre (inner hill levels, lake shallows, ...).
+function outlinePath(t, k = 1, ox = 0, oy = 0) {
+  const P = areaPoly(t); if (k === 1 && !ox && !oy) return smoothClosed(P);
+  const [cx, cy] = centroidOf(P); return smoothClosed(P.map(([x, y]) => [cx + (x - cx) * k + ox, cy + (y - cy) * k + oy]));
+}
+// Ramer–Douglas–Peucker: turns a freehand stroke into a few control points.
+function simplifyPts(P, eps) {
+  if (P.length < 3) return P;
+  let idx = 0, dmax = 0; const a = P[0], b = P[P.length - 1];
+  for (let i = 1; i < P.length - 1; i++) { const d = segDist(P[i], a, b); if (d > dmax) { dmax = d; idx = i; } }
+  return dmax > eps ? [...simplifyPts(P.slice(0, idx + 1), eps).slice(0, -1), ...simplifyPts(P.slice(idx), eps)] : [a, b];
+}
 const polyArea = P => P.reduce((a, p, i) => { const q = P[(i + 1) % P.length]; return a + p[0] * q[1] - q[0] * p[1]; }, 0) / 2;
 function segDist(p, a, b) { const L2 = (b[0] - a[0]) ** 2 + (b[1] - a[1]) ** 2 || 1, k = clamp(((p[0] - a[0]) * (b[0] - a[0]) + (p[1] - a[1]) * (b[1] - a[1])) / L2, 0, 1); return Math.hypot(p[0] - a[0] - k * (b[0] - a[0]), p[1] - a[1] - k * (b[1] - a[1])); }
 function scatterPoly(R, P, n, minD, margin) {
@@ -544,7 +561,7 @@ function areaTerrain(t) {
       const L = clamp(t.levels || 2, 1, 4), cols = ['#86bd3a', '#6aa830', '#529427', '#3f7f1f'];
       for (let l = 0; l < L; l++) {
         const k = 1 - l * (.62 / Math.max(L, 2) + .06), ox = l ? (R() - .5) * rx * .12 : 0, oy = l ? (R() - .5) * ry * .12 : 0;
-        s += `<path d="${blob((t.seed || 1) + l * 31, rx * k, ry * k, 11, .2, ox, oy)}" fill="${cols[l]}" stroke="#3a6b1c" stroke-width="${l ? 1.4 : 2.2}"/>`;
+        s += `<path d="${t.area ? outlinePath(t, k, ox, oy) : blob((t.seed || 1) + l * 31, rx * k, ry * k, 11, .2, ox, oy)}" fill="${cols[l]}" stroke="#3a6b1c" stroke-width="${l ? 1.4 : 2.2}"/>`;
       }
       break;
     }
@@ -558,18 +575,19 @@ function areaTerrain(t) {
       break;
     }
     case 'lake':
-      s = `<path d="${blob(t.seed, rx, ry, 10, .18)}" fill="#3b8fd6" stroke="#1b4c86" stroke-width="3"/><path d="${blob(t.seed + 7, rx * .66, ry * .6, 9, .2, -rx * .06, -ry * .06)}" fill="#64b0ea" opacity=".6"/>`;
+      s = `<path d="${t.area ? outlinePath(t) : blob(t.seed, rx, ry, 10, .18)}" fill="#3b8fd6" stroke="#1b4c86" stroke-width="3"/><path d="${t.area ? outlinePath(t, .66, -rx * .06, -ry * .06) : blob(t.seed + 7, rx * .66, ry * .6, 9, .2, -rx * .06, -ry * .06)}" fill="#64b0ea" opacity=".6"/>`;
       break;
     case 'marsh': {
-      s = `<path d="${blob(t.seed, rx, ry, 12, .25)}" fill="#8cc63f" stroke="#6ea535" stroke-width="1.2" stroke-dasharray="3 3"/>`;
+      s = `<path d="${t.area ? outlinePath(t) : blob(t.seed, rx, ry, 12, .25)}" fill="#8cc63f" stroke="#6ea535" stroke-width="1.2" stroke-dasharray="3 3"/>`;
       let pud = '', tufts = '';
-      for (const [x, y] of scatter(R, rx, ry, Math.round(dens * rx * ry / 900) + 2, 26, 14)) pud += `<ellipse cx="${f(x)}" cy="${f(y)}" rx="${f(6 + R() * 6)}" ry="${f(3 + R() * 2)}"/>`;
-      for (const [x, y] of scatter(R, rx, ry, Math.round(dens * Math.PI * rx * ry / 380), 12, 8)) tufts += `M${f(x)},${f(y)}l-4,-9M${f(x)},${f(y)}l0,-11M${f(x)},${f(y)}l4,-9`;
+      for (const [x, y] of fillPts(t, R, 2800, 26, 14, 2)) pud += `<ellipse cx="${f(x)}" cy="${f(y)}" rx="${f(6 + R() * 6)}" ry="${f(3 + R() * 2)}"/>`;
+      for (const [x, y] of fillPts(t, R, 380, 12, 8)) tufts += `M${f(x)},${f(y)}l-4,-9M${f(x)},${f(y)}l0,-11M${f(x)},${f(y)}l4,-9`;
       s += `<g fill="#4f9fd2" stroke="#2a6a98" stroke-width="1">${pud}</g><path d="${tufts}" fill="none" stroke="#2d6f22" stroke-width="1.7" stroke-linecap="round"/>`;
       break;
     }
     case 'crater':
-      s = `<path d="${blob(t.seed, rx, ry, 10, .15)}" fill="#7c9b34" stroke="#465d1a" stroke-width="2.2"/><path d="${blob(t.seed + 3, rx * .62, ry * .58, 9, .2, rx * .05, ry * .08)}" fill="#5b7522"/><path d="${blob(t.seed + 5, rx * .3, ry * .25, 7, .2, rx * .1, ry * .14)}" fill="#4a601b"/>`;
+      s = t.area ? `<path d="${outlinePath(t)}" fill="#7c9b34" stroke="#465d1a" stroke-width="2.2"/><path d="${outlinePath(t, .62, rx * .05, ry * .08)}" fill="#5b7522"/><path d="${outlinePath(t, .3, rx * .1, ry * .14)}" fill="#4a601b"/>`
+        : `<path d="${blob(t.seed, rx, ry, 10, .15)}" fill="#7c9b34" stroke="#465d1a" stroke-width="2.2"/><path d="${blob(t.seed + 3, rx * .62, ry * .58, 9, .2, rx * .05, ry * .08)}" fill="#5b7522"/><path d="${blob(t.seed + 5, rx * .3, ry * .25, 7, .2, rx * .1, ry * .14)}" fill="#4a601b"/>`;
       break;
     case 'cacti': {
       s = `<path d="${t.area ? smoothClosed(areaPoly(t)) : blob(t.seed, rx, ry, 11, .25)}" fill="#c2a55a" opacity=".35"/>`;
@@ -577,6 +595,17 @@ function areaTerrain(t) {
       break;
     }
     case 'crystal': {
+      if (t.area) {   // a drawn area fills with small crystal clusters
+        s = `<path d="${outlinePath(t)}" fill="#7fd8ff" opacity=".3"/>`;
+        const shards = [], cores = [];
+        for (const [cx, cy] of fillPts(t, R, 2600, 30, 14)) {
+          const m = 4 + Math.floor(R() * 3), sc = .7 + R() * .5, cs = [];
+          for (let i = 0; i < m; i++) cs.push({ a: i / m * Math.PI * 2 + (R() - .5) * .8, L: (14 + R() * 12) * sc, w: (8 + R() * 5) * sc, ox: cx, oy: cy });
+          shards.push(...cs.sort((p, q) => Math.sin(p.a) - Math.sin(q.a))); cores.push({ x: cx, y: cy, size: 10 * sc });
+        }
+        s += scatterSprites('crystal-shard', shards.map(sh => ({ x: sh.ox + Math.cos(sh.a) * sh.L / 2, y: sh.oy + Math.sin(sh.a) * sh.L / 2, w: sh.L, h: sh.w, rot: sh.a * 180 / Math.PI })), R) + scatterSprites('crystal-core', cores, R);
+        break;
+      }
       s = `<path d="${blob(t.seed, rx * .9, ry * .9, 10, .2)}" fill="#7fd8ff" opacity=".3"/>`;
       const n = Math.max(4, Math.round(4 + dens * Math.PI * rx * ry / 1100)), shards = [];
       for (let i = 0; i < n; i++) {
@@ -1049,7 +1078,9 @@ function overlaySVG() {
     const tu = unitAt(d.cur, d.from), tmp = { kind: ui.shotKind, from: d.from, x1: d.start.x, y1: d.start.y, to: tu ? tu.id : null, x2: d.cur.x, y2: d.cur.y, width: 1, impact: true, seed: 3 };
     o += `<g opacity=".8">${shotSVG(tmp, shotGeom(tmp))}</g>`;
   }
-  if (d && d.type === 'lasso' && d.pts.length > 1) o += `<path d="M${d.pts.map(q => f(q[0]) + ',' + f(q[1])).join('L')}Z" fill="#3dac3d" fill-opacity=".25" stroke="#0a84ff" stroke-width="${f(sw * 1.4)}" stroke-dasharray="${f(6 / z)} ${f(4 / z)}" stroke-linejoin="round" pointer-events="none"/>`;
+  if (d && d.type === 'stroke' && d.pts.length > 1) o += `<path d="M${d.pts.map(q => f(q[0]) + ',' + f(q[1])).join('L')}" fill="none" stroke="#0a84ff" stroke-width="${f(sw * 2)}" stroke-dasharray="${f(6 / z)} ${f(4 / z)}" stroke-linecap="round" stroke-linejoin="round" pointer-events="none"/>`;
+  if (d && d.type === 'box') { const b = boxOf(d); if (b.w > 2 || b.h > 2) o += `<rect x="${f(b.x - b.w / 2)}" y="${f(b.y - b.h / 2)}" width="${f(b.w)}" height="${f(b.h)}" fill="#0a84ff" fill-opacity=".12" stroke="#0a84ff" stroke-width="${f(sw * 1.4)}" stroke-dasharray="${f(6 / z)} ${f(4 / z)}" pointer-events="none"/>`; }
+  if (d && d.type === 'lasso' && d.pts.length > 1) o += `<path d="M${d.pts.map(q => f(q[0]) + ',' + f(q[1])).join('L')}Z" fill="#0a84ff" fill-opacity=".14" stroke="#0a84ff" stroke-width="${f(sw * 1.4)}" stroke-dasharray="${f(6 / z)} ${f(4 / z)}" stroke-linejoin="round" pointer-events="none"/>`;
   if (d && d.type === 'draw' && d.pts.length > 1) o += `<g opacity=".8">${magicSVG({ points: d.pts, style: ui.magicStyle, width: 8, jag: 0 })}</g>`;
   if (d && d.type === 'newarrow' && Math.hypot(d.cur.x - d.start.x, d.cur.y - d.start.y) > 8) o += `<g opacity=".7">${fatArrowSVG({ x1: d.start.x, y1: d.start.y, x2: d.cur.x, y2: d.cur.y, bend: 0 }, 18, ui.arrowColor, { wobble: ui.arrowWobble || 0 })}</g>`;
   if (ui.trace) {
@@ -1170,7 +1201,7 @@ function toolOptionsHTML() {
     case 'terrain': {
       const pick = c => `<button data-act="terType" data-v="custom:${c.id}" class="${'custom:' + c.id === ui.terrainType ? 'on' : ''}">${terrainPreview('custom:' + c.id)}${esc(c.name)}</button>`;
       const libSel = ui.terrainType.startsWith('custom:') ? library.find(c => 'custom:' + c.id === ui.terrainType) : null;
-      return sec('Place terrain', `<p class="hint">Choose a feature, then click the map – the tool stays on, so you can place many in a row. For woods, rocks and cacti, <b>drag around an area</b> to fill it. Terrain is shared by every round.</p><div class="pal">${TER_PALETTE.map(([k, l]) => `<button data-act="terType" data-v="${k}" class="${k === ui.terrainType ? 'on' : ''}">${terrainPreview(k)}${l}</button>`).join('')}</div>`) +
+      return sec('Place terrain', `<p class="hint">Choose a feature, then click the map – the tool stays on, so you can place many in a row. <b>Drag</b> to draw: around an area for woods, rocks, cacti, crystals, marshes, hills, lakes and craters; a box for buildings (Shift keeps proportions); along the route for rivers, roads and walls. Terrain is shared by every round.</p><div class="pal">${TER_PALETTE.map(([k, l]) => `<button data-act="terType" data-v="${k}" class="${k === ui.terrainType ? 'on' : ''}">${terrainPreview(k)}${l}</button>`).join('')}</div>`) +
         sec('Buildings in this report', `<p class="hint">Trace a building's outline on the map and add details in the drawing editor, draw one from scratch, or import a top-down plan as .svg. Saved in the project file.</p>` +
           (doc.customTerrain.length ? `<div class="pal">${doc.customTerrain.map(pick).join('')}</div>` : '') +
           `<div class="btns"><button data-act="traceStart">Trace building</button><button data-act="bldNew">Draw building…</button><button data-act="importTer">Import SVG…</button></div>`) +
@@ -1592,7 +1623,16 @@ function nudge(dx, dy) {
 }
 
 /* ---------------------------- Placement --------------------------------- */
-// Fills an outline drawn on the map with the chosen terrain (wood, rocks, cacti).
+const boxOf = d => ({ x: (d.start.x + d.cur.x) / 2, y: (d.start.y + d.cur.y) / 2, w: Math.abs(d.cur.x - d.start.x), h: Math.abs(d.cur.y - d.start.y) });
+// Buildings and other fixed pieces fill a box dragged on the map (Shift keeps their own proportions).
+function placeBox(b, keep) {
+  place('terrain', { x: b.x, y: b.y });
+  const t = getObj(ui.sel[0]); if (!t || t.points) return;
+  if (keep) { const k = Math.min(b.w / t.w, b.h / t.h); t.w = Math.max(10, Math.round(t.w * k)); t.h = Math.max(10, Math.round(t.h * k)); }
+  else { t.w = Math.max(10, Math.round(b.w)); t.h = Math.max(10, Math.round(b.h)); }
+  t.x = Math.round(b.x); t.y = Math.round(b.y); renderPanel(); render();
+}
+// Fills an outline drawn on the map with the chosen terrain (woods, rocks, crystals, hills, lakes ...).
 function placeArea(raw) {
   const pts = raw.filter((q, i, a) => !i || Math.hypot(q[0] - a[i - 1][0], q[1] - a[i - 1][1]) >= 6);
   if (pts.length < 3) return;
@@ -1681,6 +1721,8 @@ svg.addEventListener('pointerdown', e => {
   } else if (ui.tool === 'arrow') ui.drag = { type: 'newarrow', start: p, cur: p };
   else if (ui.tool === 'fire') { const u = unitAt(p), st = u && stateAt(u, ui.cur); ui.drag = { type: 'newshot', start: st ? { x: st.x, y: st.y } : p, from: u ? u.id : null, cur: p }; }
   else if (ui.tool === 'terrain' && AREA_TYPES.has(ui.terrainType)) ui.drag = { type: 'lasso', pts: [[p.x, p.y]] };
+  else if (ui.tool === 'terrain' && PATH_TYPES.has(ui.terrainType)) ui.drag = { type: 'stroke', pts: [[p.x, p.y]] };
+  else if (ui.tool === 'terrain') ui.drag = { type: 'box', start: p, cur: p };
   else if (ui.tool === 'effect' && ui.effectType === 'magic') ui.drag = { type: 'draw', pts: [[p.x, p.y]] };
   else { place(ui.tool, p); return; }
   svg.setPointerCapture(e.pointerId);
@@ -1699,7 +1741,8 @@ svg.addEventListener('pointermove', e => {
     if (!d.pushed) { pushHistory(); d.pushed = true; }
     applyHandle(d.h, p, e); render();
   } else if (d.type === 'rubber' || d.type === 'newarrow' || d.type === 'newshot') { d.cur = p; render(); }
-  else if (d.type === 'lasso') { const l = d.pts[d.pts.length - 1]; if (Math.hypot(p.x - l[0], p.y - l[1]) * ui.zoom > 5) { d.pts.push([p.x, p.y]); skel.ovG.innerHTML = overlaySVG(); } }
+  else if (d.type === 'box') { d.cur = p; d.keep = e.shiftKey; skel.ovG.innerHTML = overlaySVG(); }
+  else if (d.type === 'lasso' || d.type === 'stroke') { const l = d.pts[d.pts.length - 1]; if (Math.hypot(p.x - l[0], p.y - l[1]) * ui.zoom > 5) { d.pts.push([p.x, p.y]); skel.ovG.innerHTML = overlaySVG(); } }
   else if (d.type === 'draw') { const l = d.pts[d.pts.length - 1]; if (Math.hypot(p.x - l[0], p.y - l[1]) * ui.zoom > 4) { d.pts.push([p.x, p.y]); render(); } }
 });
 function endDrag(e) {
@@ -1719,6 +1762,16 @@ function endDrag(e) {
     pushHistory();
     const a = { id: uid(), type: 'shot', round: rid(ui.cur), kind: ui.shotKind, x1: Math.round(d.start.x), y1: Math.round(d.start.y), x2: Math.round(x2), y2: Math.round(y2), from: d.from, to: tu ? tu.id : null, width: 1, impact: true, seed: randSeed() };
     doc.annos.push(a); ui.sel = [{ k: 'anno', id: a.id }]; renderPanel();
+  } else if (d.type === 'box') {
+    const b = boxOf(d);
+    if (b.w < 12 && b.h < 12) place('terrain', d.start); else placeBox(b, d.keep);
+    return;
+  } else if (d.type === 'stroke') {
+    const len = d.pts.reduce((a, q, i) => i ? a + Math.hypot(q[0] - d.pts[i - 1][0], q[1] - d.pts[i - 1][1]) : 0, 0);
+    if (len < 30) { place('terrain', { x: d.pts[0][0], y: d.pts[0][1] }); return; }
+    place('terrain', { x: d.pts[0][0], y: d.pts[0][1] });
+    const t = getObj(ui.sel[0]); if (t && t.points) { t.points = simplifyPts(d.pts, 4).map(q => [Math.round(q[0]), Math.round(q[1])]); render(); }
+    return;
   } else if (d.type === 'lasso') {
     const xs = d.pts.map(q => q[0]), ys = d.pts.map(q => q[1]);
     if (Math.max(...xs) - Math.min(...xs) < 20 && Math.max(...ys) - Math.min(...ys) < 20) place('terrain', { x: d.pts[0][0], y: d.pts[0][1] });   // a click: default patch

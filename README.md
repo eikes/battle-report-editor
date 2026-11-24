@@ -1,6 +1,6 @@
 # Battle Report Editor
 
-Beware: This is totally just vibe coded. I don't think it's easy to maintain this code manually.
+> **Beware:** This is totally just vibe coded. I don't think it's easy to maintain this code manually.
 
 ## Start it
 
@@ -35,7 +35,11 @@ Hills, lakes, marshes, craters, the buildings with adjustable wall thickness, ri
 ## Terrain tips
 
 - The Terrain tool stays on after you place something, so you can place many pieces in a row.
-- For woods, rocks and cacti, drag around an area on the map to fill it. A single click places a default-size patch.
+- Drag on the map to draw terrain. A single click places a default-size piece.
+  - Woods, rocks, cacti, crystals and marshes: drag around an area and it fills.
+  - Hills, lakes and craters: drag around an area and they take its shape.
+  - Buildings and other fixed pieces: drag a box and they fill it. Hold Shift to keep their proportions.
+  - Rivers, roads and walls: drag along the route.
 - **Trace building** works like tracing a model: click the outline on the map, then add details in the drawing editor. **Draw building…** starts from a blank canvas. In the editor, building shapes have their own colours and edge styles (solid, ruined walls, hazard stripes).
 
 ## Editing the SVGs
