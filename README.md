@@ -1,6 +1,6 @@
 # Battle Report Editor
 
-Beware: This is totally just vibe coded. I don't think it's easy to maintain this code manually. 
+Beware: This is totally just vibe coded. I don't think it's easy to maintain this code manually.
 
 ## Start it
 
@@ -20,6 +20,7 @@ Then open http://localhost:8000/ in your browser. Stop the server with Ctrl+C.
 | `index.html` | Page layout |
 | `css/editor.css` | Styles |
 | `js/editor.js` | Editor code |
+| `js/unit-art.js` | Model drawings and the drawing editor |
 | `icons/` | Toolbar and logo icons |
 | `symbols/*.svg` | Unit symbols, one file each |
 | `symbols/symbols.json` | Picker groups and order |
@@ -47,3 +48,17 @@ Reload the page after saving a file.
 - Groups or layers named with `data-layer` are drawn layer by layer across all pieces. This is how tree canopies merge.
 
 Projects you save (`.battle.json`) store symbol names only. If you change a symbol file, every project that uses it picks up the change.
+
+## Model drawings
+
+In the unit panel, set **Look** to **Model drawing** to show a unit as a drawing (for example a top-down tank) instead of a counter. There are three ways to get one:
+
+- **Draw new…** opens the drawing editor. It has rectangle, ellipse, polygon and line tools, mirrored copies, and an optional photo to trace over.
+- **Trace on map** lets you click the model's outline on the map or reference photo. The drawing editor then opens with the photo behind it.
+- **Upload SVG…** uses an SVG file. Single-colour SVGs are recoloured with the faction colour.
+
+Drawn models use relative colours (faction colour, darker, lighter), so one drawing works for every army. Models face right.
+
+## Library
+
+Buildings you trace, model drawings you draw or trace, and anything you choose "Save to library" for are kept in your browser and offered in every battle. Browsers store this per address: `http://localhost:8000` and `http://localhost:8001` have separate libraries. To back up the library or move it to another browser or computer, use **Export library…** and **Import library…** in the Terrain tool.

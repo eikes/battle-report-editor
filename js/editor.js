@@ -79,7 +79,7 @@ function blankDoc() {
       { id: 'f2', name: 'Red Horde', color: '#d8271c', ink: '#111111', arrow: '#ffe23a' },
     ],
     rounds: [{ id: uid(), name: 'Deployment' }, { id: uid(), name: 'Turn 1' }],
-    terrain: [], units: [], annos: [], ref: null, customIcons: [], customTerrain: [], groups: [],
+    terrain: [], units: [], annos: [], ref: null, customIcons: [], customTerrain: [], unitArt: [], groups: [],
   };
 }
 function normalize(d) {
@@ -88,7 +88,10 @@ function normalize(d) {
   d.view = Object.assign({}, b.view, d.view || {});
   if (!Array.isArray(d.rounds) || !d.rounds.length) d.rounds = b.rounds;
   if (!Array.isArray(d.factions) || !d.factions.length) d.factions = b.factions;
-  for (const k of ['terrain', 'units', 'annos', 'customIcons', 'customTerrain', 'groups']) if (!Array.isArray(d[k])) d[k] = [];
+  for (const k of ['terrain', 'units', 'annos', 'customIcons', 'customTerrain', 'unitArt', 'groups']) if (!Array.isArray(d[k])) d[k] = [];
+  // Designs from a file are rebuilt from their points or re-sanitized, never trusted as raw markup.
+  d.customTerrain = d.customTerrain.filter(isDesign).flatMap(c => { try { return [cleanDesign(c)]; } catch (err) { return []; } });
+  d.unitArt = d.unitArt.map(cleanArt).filter(Boolean);
   for (const u of d.units) { if (u.ghost) { for (const k of Object.values(u.keys || {})) if (!k.ghost) k.ghost = u.ghost; delete u.ghost; } u.keys = u.keys || {}; u.w = u.w || 40; u.h = u.h || u.w; u.shape = u.shape || 'rect'; u.icon = u.icon || 'none'; u.name = u.name || ''; u.label = u.label || ''; }
   return d;
 }
@@ -157,7 +160,7 @@ let doc;
 const ui = {
   tool: 'select', sel: [], cur: 0, zoom: 1, ghosts: true, lockTerrain: false,
   terrainType: 'hill', effectType: 'explosion', magicStyle: 'psychic', shotKind: 'bullets', arrowColor: '#3d9be9', calloutStyle: 'yellow',
-  tpl: { faction: 'f1', name: 'Infantry Squad', shape: 'rect', icon: 'infantry', w: 50, h: 30 },
+  tpl: { faction: 'f1', name: 'Infantry Squad', look: 'counter', shape: 'rect', icon: 'infantry', w: 50, h: 30 },
   drag: null, space: false, L: null,
 };
 const hist = [], fut = [];
@@ -192,7 +195,7 @@ function ensureKey(u, ri) {
   return u.keys[id];
 }
 function firstKeyIdx(u) { return doc.rounds.findIndex(r => u.keys[r.id]); }
-function dims(u) { return u.shape === 'circle' ? [u.w, u.w] : [u.w, u.h]; }
+function dims(u) { return u.shape === 'circle' && u.look !== 'model' ? [u.w, u.w] : [u.w, u.h]; }
 function facOf(u) { return doc.factions.find(fa => fa.id === u.faction) || doc.factions[0] || { color: '#888888', ink: '#111111', arrow: '#3d9be9', name: '?' }; }
 /* Groups: units sharing u.group move together and get one arrow. */
 const groupOf = u => u && u.group ? doc.groups.find(g => g.id === u.group) || null : null;
@@ -421,10 +424,89 @@ function roundTitleSVG(W, name, pad = 20) {
   return name ? `<text x="${f(x)}" y="${pad + headerH() - 26}" text-anchor="end" font-family="${SERIF}" font-size="22" font-style="italic" fill="#333333">${esc(name)}</text>` : '';
 }
 
+/* ---------------- Traced buildings and the building library ----------------
+   Traced buildings keep their corner points, so their style can be changed later.
+   The library lives in this browser (localStorage) and is shared by every battle;
+   placing a library design copies it into the project so the file stays complete. */
+const TRACE_STYLES = [['building', 'Building (grey)'], ['ruin', 'Ruin (stone, broken walls)'], ['platform', 'Platform (hazard edge)']];
+function tracedMarkup(pts, style, id, seed) {
+  const P = pts.map(p => f(p[0]) + ',' + f(p[1])).join(' '), poly = a => `<polygon points="${P}" ${a}/>`;
+  const shadow = poly('transform="translate(5,5)" fill="#000000" opacity=".22"');
+  if (style === 'ruin') {
+    const R = rng(seed || 1), dash = []; for (let i = 0; i < 10; i++) dash.push(f(25 + R() * 70), f(6 + R() * 16));
+    const pid = `tr${id}-tiles`, da = `stroke-dasharray="${dash.join(' ')}" stroke-linejoin="round"`;
+    return `<defs><pattern id="${pid}" width="14" height="14" patternUnits="userSpaceOnUse"><path d="M14 0H0V14" fill="none" stroke="#5b5348" stroke-opacity=".28" stroke-width="1"/></pattern></defs>` +
+      shadow + poly('fill="#c4bba6"') + poly(`fill="url(#${pid})"`) + poly(`fill="none" stroke="#2a2622" stroke-width="8" ${da}`) + poly(`fill="none" stroke="#8d867b" stroke-width="4.5" ${da}`);
+  }
+  if (style === 'platform') return shadow + poly('fill="#8e959d"') + poly('fill="none" stroke="#111111" stroke-width="7" stroke-linejoin="round"') + poly('fill="none" stroke="#ffd21f" stroke-width="7" stroke-dasharray="9 9" stroke-linejoin="round"') + poly('fill="none" stroke="#1d2025" stroke-width="1.5" stroke-linejoin="round"');
+  return shadow + poly('fill="#8c9297" stroke="#2a2e33" stroke-width="3" stroke-linejoin="miter"');
+}
+const LIB_KEY = 'battle-report-editor-library-v1';
+let library = [], unitLibrary = [];   // building designs, model drawings
+const isDesign = c => c && typeof c.id === 'string' && typeof c.viewBox === 'string' && (typeof c.markup === 'string' || c.traced);
+// Rebuilds a design's markup from trusted parts: traced points, or the SVG sanitizer.
+function cleanDesign(c) {
+  const out = { id: String(c.id).replace(/[^\w-]/g, '').slice(0, 40) || uid(), name: String(c.name || 'Building').slice(0, 60), viewBox: String(c.viewBox) };
+  const t = c.traced;
+  if (t && Array.isArray(t.pts) && t.pts.length >= 3 && t.pts.every(p => Array.isArray(p) && isFinite(p[0]) && isFinite(p[1]))) {
+    const style = TRACE_STYLES.some(([k]) => k === t.style) ? t.style : 'building', seed = +t.seed || 1;
+    out.traced = { pts: t.pts.map(p => [+p[0], +p[1]]), style, seed }; out.markup = tracedMarkup(out.traced.pts, style, out.id, seed);
+  } else out.markup = importSvgIcon(`<svg xmlns="http://www.w3.org/2000/svg" viewBox="${esc(out.viewBox)}">${c.markup}</svg>`, out.name).markup;
+  return out;
+}
+function loadLibrary() {
+  try { const d = JSON.parse(localStorage.getItem(LIB_KEY) || 'null'); library = d && Array.isArray(d.designs) ? d.designs.filter(isDesign) : []; unitLibrary = d && Array.isArray(d.units) ? d.units.filter(a => a && a.id) : []; } catch (err) { library = []; unitLibrary = []; }
+}
+function saveLibrary() {
+  try { localStorage.setItem(LIB_KEY, JSON.stringify({ v: 1, designs: library, units: unitLibrary })); return true; } catch (err) { toast('Could not save the library – browser storage is full. Export it, then remove some designs.'); return false; }
+}
+const inLibrary = id => library.some(c => c.id === id);
+const designById = id => doc.customTerrain.find(c => c.id === id) || library.find(c => c.id === id);
+function libAdd(c) { const copy = JSON.parse(JSON.stringify(c)), i = library.findIndex(x => x.id === c.id); if (i >= 0) library[i] = copy; else library.push(copy); return saveLibrary(); }
+function libSync(c) { if (c && inLibrary(c.id)) libAdd(c); }
+
+/* tracing: ui.trace = { pts: [[x, y]...], cur } in map coordinates */
+function traceSnap(p, shift) {
+  const t = ui.trace, last = t && t.pts[t.pts.length - 1]; if (!shift || !last) return p;
+  const dx = p.x - last[0], dy = p.y - last[1], L = Math.hypot(dx, dy), a = Math.round(Math.atan2(dy, dx) / (Math.PI / 12)) * (Math.PI / 12);
+  return { x: last[0] + Math.cos(a) * L, y: last[1] + Math.sin(a) * L };
+}
+function startTrace(kind = 'building') {
+  if (kind === 'building') { if (ui.tool !== 'terrain') setTool('terrain', true); ui.sel = []; }
+  else if (!['unit', 'munit'].includes(ui.artTraceTarget) && ui.tool !== 'unit') setTool('unit', true);
+  ui.trace = { kind, pts: [], cur: null }; renderPanel(); render();
+}
+function cancelTrace() { ui.trace = null; renderPanel(); render(); }
+function traceClick(p, shift) {
+  const t = ui.trace, q = traceSnap(p, shift), last = t.pts[t.pts.length - 1];
+  if (t.pts.length >= 3 && Math.hypot(q.x - t.pts[0][0], q.y - t.pts[0][1]) < 10 / ui.zoom) return finishTrace();
+  if (last && Math.hypot(q.x - last[0], q.y - last[1]) < 3 / ui.zoom) return;   // second click of a double-click
+  t.pts.push([q.x, q.y]); renderPanel(); render();
+}
+function finishTrace() {
+  const t = ui.trace; if (!t) return;
+  const pts = t.pts.filter((p, i, a) => !i || Math.hypot(p[0] - a[i - 1][0], p[1] - a[i - 1][1]) >= 1);
+  if (pts.length < 3) return toast('Click at least three corners first');
+  if (t.kind === 'unit') return finishUnitTrace(pts);
+  const r1 = v => Math.round(v * 10) / 10, xs = pts.map(p => p[0]), ys = pts.map(p => p[1]);
+  const x0 = Math.min(...xs), y0 = Math.min(...ys), w = r1(Math.max(...xs) - x0), h = r1(Math.max(...ys) - y0);
+  if (w < 4 || h < 4) return toast('That outline is too small');
+  const id = uid(), style = ui.traceStyle || 'building', seed = randSeed(), rel = pts.map(([x, y]) => [r1(x - x0), r1(y - y0)]);
+  const n = new Set([...doc.customTerrain, ...library].filter(c => c.traced).map(c => c.id)).size + 1;
+  const c = { id, name: 'Traced building ' + n, viewBox: `0 0 ${w} ${h}`, traced: { pts: rel, style, seed } };
+  c.markup = tracedMarkup(rel, style, id, seed);
+  pushHistory(); doc.customTerrain.push(c);
+  const piece = { id: uid(), type: 'custom', custom: id, x: r1(x0 + w / 2), y: r1(y0 + h / 2), w, h, rot: 0, seed: 1 };
+  doc.terrain.push(piece); ui.trace = null; ui.terrainType = 'custom:' + id;
+  const saved = libAdd(c);
+  setTool('select', true); ui.sel = [{ k: 'ter', id: piece.id }]; renderPanel(); render();
+  toast(saved ? 'Building traced and saved to your library' : 'Building traced');
+}
+
 /* terrain */
 const terCache = new Map();
 function customTerrainSVG(t) {
-  const c = doc.customTerrain.find(x => x.id === t.custom);
+  const c = designById(t.custom);
   if (!c) return `<rect x="${-t.w / 2}" y="${-t.h / 2}" width="${t.w}" height="${t.h}" fill="none" stroke="#c0392b" stroke-width="2" stroke-dasharray="6 4"/><text text-anchor="middle" y="5" font-family="${FONT}" font-size="13" fill="#c0392b">missing design</text>`;
   return artSVG(c, t);
 }
@@ -564,6 +646,7 @@ function iconSVG(name, s, color, bg) {
 }
 function unitShapeSVG(u, ov) {
   const fa = facOf(u), fill = ov?.fill || fa.color, ink = ov?.ink || fa.ink, [w, h] = dims(u); let sh;
+  if (u.look === 'model') { const a = artById(u.art); if (a) return artUnitSVG(a, w, h, fill, ink); }
   switch (u.shape) {
     case 'circle': sh = `<circle r="${w / 2}"/>`; break;
     case 'oval': sh = `<ellipse rx="${w / 2}" ry="${h / 2}"/>`; break;
@@ -576,7 +659,8 @@ function unitShapeSVG(u, ov) {
 }
 function unitSVG(u, st, sel, extraAttr = '') {
   const [w, h] = dims(u);
-  let s = `<g transform="translate(${f(st.x)},${f(st.y)}) rotate(${st.rot || 0})">${unitShapeSVG(u)}</g>`;
+  const hit = sel && u.look === 'model' ? `<rect x="${f(-w / 2)}" y="${f(-h / 2)}" width="${f(w)}" height="${f(h)}" fill="#000" fill-opacity="0"/>` : '';
+  let s = `<g transform="translate(${f(st.x)},${f(st.y)}) rotate(${st.rot || 0})">${hit}${unitShapeSVG(u)}</g>`;
   if (doc.view.labels && u.label) s += `<text x="${f(st.x)}" y="${f(st.y + Math.max(w, h) / 2 + 13)}" text-anchor="middle" font-family="${FONT}" font-size="11" font-weight="bold" fill="#111111" stroke="#ffffff" stroke-width="3" stroke-linejoin="round" paint-order="stroke">${esc(u.label)}</text>`;
   return `<g${sel ? ` data-sel="unit:${u.id}"` : ''}${extraAttr}>${s}</g>`;
 }
@@ -880,7 +964,7 @@ function render() {
   skel.mapG.setAttribute('transform', `translate(${L.mapX},${L.mapY})`);
   skel.frame.setAttribute('width', doc.w); skel.frame.setAttribute('height', doc.h);
   setIf(skel.bgG, bgSVG());
-  const tk = JSON.stringify(doc.terrain);
+  const tk = JSON.stringify(doc.terrain) + doc.customTerrain.map(c => c.id + ':' + c.markup.length + ':' + (c.traced ? c.traced.style : '')).join();
   if (tk !== terKey) { skel.terG.innerHTML = terrainSVG(true); terKey = tk; }
   skel.terG.classList.toggle('locked', !!ui.lockTerrain);
   setIf(skel.refG, refSVG(false));
@@ -965,6 +1049,11 @@ function overlaySVG() {
   }
   if (d && d.type === 'draw' && d.pts.length > 1) o += `<g opacity=".8">${magicSVG({ points: d.pts, style: ui.magicStyle, width: 8, jag: 0 })}</g>`;
   if (d && d.type === 'newarrow' && Math.hypot(d.cur.x - d.start.x, d.cur.y - d.start.y) > 8) o += `<g opacity=".7">${fatArrowSVG({ x1: d.start.x, y1: d.start.y, x2: d.cur.x, y2: d.cur.y, bend: 0 }, 18, ui.arrowColor, { wobble: ui.arrowWobble || 0 })}</g>`;
+  if (ui.trace) {
+    const t = ui.trace, pts = t.cur ? [...t.pts, [t.cur.x, t.cur.y]] : t.pts;
+    if (pts.length >= 2) o += `<polygon points="${pts.map(p => f(p[0]) + ',' + f(p[1])).join(' ')}" fill="#0a84ff" fill-opacity=".14" stroke="#0a84ff" stroke-width="${f(sw * 1.4)}" stroke-linejoin="round" pointer-events="none"/>`;
+    t.pts.forEach((q, i) => { o += `<circle cx="${f(q[0])}" cy="${f(q[1])}" r="${f(i ? hr * .7 : hr * 1.1)}" fill="${i ? '#ffffff' : '#ffd23f'}" stroke="#0a84ff" stroke-width="${f(sw)}" pointer-events="none"/>`; });
+  }
   return o;
 }
 
@@ -1052,6 +1141,7 @@ const scopeRow = a => row('Shown in', I.sel('obj', 'round', a.round === '*' ? '*
 const commonBtns = (order = 'z') => `<div class="btns">${order ? `<button data-act="front" title="Above everything (units and effects)">To front</button><button data-act="fwd" title="Up one step – e.g. above the vehicle it overlaps">Forward</button><button data-act="bwd" title="Down one step – e.g. behind a vehicle">Backward</button><button data-act="back" title="Below all units and effects">To back</button>` : ''}</div><div class="btns"><button data-act="dup" title="⌘/Ctrl+D">Duplicate</button><button class="danger" data-act="del" title="Delete">Delete</button></div>`;
 
 function renderPanel() {
+  if (ui.trace) { panel.innerHTML = traceHTML(); return; }
   let h = '';
   if (ui.tool !== 'select') h += toolOptionsHTML();
   if (ui.sel.length === 1) h += selHTML(ui.sel[0]);
@@ -1059,19 +1149,33 @@ function renderPanel() {
   else if (ui.tool === 'select') h += mapHTML();
   panel.innerHTML = h;
 }
+function traceHTML() {
+  const unit = ui.trace.kind === 'unit';
+  return sec(unit ? 'Trace a model' : 'Trace a building', `<p class="hint">Click each corner of the ${unit ? 'model' : 'building'}'s outline. Hold <kbd>Shift</kbd> to keep walls at 15° steps. Finish by clicking the yellow first corner, double-clicking, or pressing <kbd>Enter</kbd>. <kbd>Backspace</kbd> removes the last corner, <kbd>Esc</kbd> cancels.</p>` +
+        (unit ? '' : row('Style', I.sel('ui', 'traceStyle', ui.traceStyle || 'building', TRACE_STYLES))) + `<p class="hint">${ui.trace.pts.length} corner${ui.trace.pts.length === 1 ? '' : 's'} so far.${doc.ref ? '' : ' Tip: load a photo of your table under Reference image (click empty map with the Select tool) and trace over it.'}</p>` +
+        `<div class="btns"><button data-act="traceFinish"${ui.trace.pts.length < 3 ? ' disabled' : ''}>Finish</button><button data-act="traceCancel">Cancel</button></div>`) +
+    (unit ? sec('', '<p class="hint">The outline becomes the model’s body; the drawing editor then opens with your photo behind it so you can add turrets, tracks and details.</p>') : '');
+}
 function toolOptionsHTML() {
   switch (ui.tool) {
     case 'unit': {
       const types = legendTypes(); const t = ui.tpl;
       const pal = types.length ? `<p class="hint">Pick an existing type, or define a new one below.</p><div class="pal">${types.map(u => `<button data-act="tplFrom" data-v="${u.id}" class="${u.name === t.name && u.faction === t.faction ? 'on' : ''}">${miniUnit(u)}${esc(u.name)}</button>`).join('')}</div>` : '';
       return sec('Place units', `<p class="hint">Click the map to place a counter. It joins the battle in the current round.</p>${pal}`) +
-        sec('New unit type', row('Type name', I.text('tpl', 'name', t.name)) + row('Faction', I.sel('tpl', 'faction', t.faction, facOpts())) + row('Shape', I.sel('tpl', 'shape', t.shape, SHAPES, 'data-rp')) + iconPicker('tpl', t.icon) + row('Width', I.range('tpl', 'w', t.w, 8, 240)) + (t.shape !== 'circle' ? row('Height', I.range('tpl', 'h', t.h, 8, 240)) : '') + `<div style="display:flex;justify-content:center;margin-top:6px">${miniUnit(t).replace('<svg ', '<svg style="width:90px;height:60px" ')}</div>`);
+        sec('New unit type', row('Type name', I.text('tpl', 'name', t.name)) + row('Faction', I.sel('tpl', 'faction', t.faction, facOpts())) + lookRows('tpl', t) + row('Width', I.range('tpl', 'w', t.w, 8, 240)) + (t.shape !== 'circle' || t.look === 'model' ? row('Height', I.range('tpl', 'h', t.h, 8, 240)) : '') + `<div style="display:flex;justify-content:center;margin-top:6px">${miniUnit(t).replace('<svg ', '<svg style="width:90px;height:60px" ')}</div>`);
     }
-    case 'terrain':
+    case 'terrain': {
+      const pick = c => `<button data-act="terType" data-v="custom:${c.id}" class="${'custom:' + c.id === ui.terrainType ? 'on' : ''}">${terrainPreview('custom:' + c.id)}${esc(c.name)}</button>`;
+      const libSel = ui.terrainType.startsWith('custom:') ? library.find(c => 'custom:' + c.id === ui.terrainType) : null;
       return sec('Place terrain', `<p class="hint">Choose a feature, then click the map. Terrain is shared by every round.</p><div class="pal">${TER_PALETTE.map(([k, l]) => `<button data-act="terType" data-v="${k}" class="${k === ui.terrainType ? 'on' : ''}">${terrainPreview(k)}${l}</button>`).join('')}</div>`) +
-        sec('Your buildings', `<p class="hint">Import top-down building plans as .svg files (e.g. drawn in Inkscape). They are saved in the project file.</p>` +
-          (doc.customTerrain.length ? `<div class="pal">${doc.customTerrain.map(c => `<button data-act="terType" data-v="custom:${c.id}" class="${'custom:' + c.id === ui.terrainType ? 'on' : ''}">${terrainPreview('custom:' + c.id)}${esc(c.name)}</button>`).join('')}</div>` : '') +
-          `<div class="btns"><button data-act="importTer">Import SVG…</button></div>`);
+        sec('Buildings in this report', `<p class="hint">Trace a building by clicking its corners on the map, or import a top-down plan as .svg (e.g. drawn in Inkscape). Saved in the project file.</p>` +
+          (doc.customTerrain.length ? `<div class="pal">${doc.customTerrain.map(pick).join('')}</div>` : '') +
+          `<div class="btns"><button data-act="traceStart">Trace building</button><button data-act="importTer">Import SVG…</button></div>`) +
+        sec('Your library', `<p class="hint">Kept in this browser and available in every battle. Traced buildings are added automatically; select any other building and choose “Save to library”. Export and import also include your model drawings${unitLibrary.length ? ` (${unitLibrary.length})` : ''}.</p>` +
+          (library.length ? `<div class="pal">${library.map(pick).join('')}</div>` : '<p class="hint">Empty so far.</p>') +
+          (libSel ? `<div class="btns"><button class="danger" data-act="libRemove" data-v="${libSel.id}">Remove “${esc(libSel.name)}” from library</button></div>` : '') +
+          `<div class="btns"><button data-act="libExport"${library.length ? '' : ' disabled'}>Export library…</button><button data-act="libImport">Import library…</button></div>`);
+    }
     case 'effect':
       return sec('Place effects', `<p class="hint">Click to place. Units marked “Destroyed” get an explosion automatically. <b>Magic line:</b> drag across the map to draw it.</p><div class="pal">${EFFECTS.map(([k, l]) => `<button data-act="effType" data-v="${k}" class="${k === ui.effectType ? 'on' : ''}"><svg viewBox="-34 -34 68 68">${k === 'magic' ? magicSVG({ points: [[-26, 14], [-8, -10], [8, 8], [26, -14]], style: ui.magicStyle, width: 5, jag: ui.magicStyle === 'lightning' ? 70 : 0, endOrb: true, seed: 3 }) : effectSVG({ variant: k, x: 0, y: 0, r: k === 'objective' ? 16 : 22, seed: 7 })}</svg>${l}</button>`).join('')}</div>` +
         (ui.effectType === 'magic' ? row('Magic style', I.sel('ui', 'magicStyle', ui.magicStyle, Object.entries(MAGIC).map(([k, v]) => [k, v.name]), 'data-rp')) : ''));
@@ -1090,7 +1194,7 @@ function toolOptionsHTML() {
 function terrainPreview(key) {
   const [type, variant] = key.split(':');
   if (type === 'custom') {
-    const c = doc.customTerrain.find(x => x.id === variant), [, , vw, vh] = c ? c.viewBox.split(' ').map(Number) : [0, 0, 1, 1], k = Math.min(72 / vw, 46 / vh);
+    const c = designById(variant), [, , vw, vh] = c ? c.viewBox.split(' ').map(Number) : [0, 0, 1, 1], k = Math.min(72 / vw, 46 / vh);
     return `<svg viewBox="-40 -26 80 52"><rect x="-40" y="-26" width="80" height="52" fill="#a6d33f"/>${terrainItemSVG({ type, custom: variant, x: 0, y: 0, w: vw * k, h: vh * k, rot: 0 }, false)}</svg>`;
   }
   const t = PATH_TYPES.has(type) ? { type, points: [[-36, 12], [-6, -8], [36, 8]], width: { river: 11, road: 8, wall: 4 }[type] } : { type, variant, x: 0, y: 0, w: type === 'crater' ? 46 : 70, h: type === 'crater' ? 38 : 44, rot: 0, seed: 9, levels: 2, density: 1 };
@@ -1103,8 +1207,8 @@ function unitPanel(u) {
     row('Type name', I.text('unit', 'name', u.name, 'placeholder="Shown in the legend"')) +
     row('Counter label', I.text('unit', 'label', u.label, 'placeholder="optional, e.g. HQ"')) +
     row('Faction', I.sel('unit', 'faction', u.faction, facOpts())) +
-    row('Shape', I.sel('unit', 'shape', u.shape, SHAPES, 'data-rp')) + iconPicker('unit', u.icon) +
-    row('Width', I.range('unit', 'w', u.w, 8, 240)) + (u.shape !== 'circle' ? row('Height', I.range('unit', 'h', u.h, 8, 240)) : '') +
+    lookRows('unit', u) +
+    row('Width', I.range('unit', 'w', u.w, 8, 240)) + (u.shape !== 'circle' || u.look === 'model' ? row('Height', I.range('unit', 'h', u.h, 8, 240)) : '') +
 
     (u.name ? `<div class="btns"><button data-act="applyType" title="Copy shape, icon and size to every unit with this type name and faction">Apply look to all “${esc(u.name)}”</button></div>` : ''));
   let r = '';
@@ -1134,7 +1238,9 @@ function terrainPanel(t) {
     if (['wood', 'rocks', 'marsh', 'cacti', 'crystal'].includes(t.type)) h += row('Density', I.range('obj', 'density', t.density ?? 1, .2, 2, .1));
     if (t.type === 'building') h += row('Shape', I.sel('obj', 'variant', t.variant || 'block', BUILDINGS));
     if (t.type === 'building' && ['L', 'T', 'cross', 'U'].includes(t.variant)) h += row('Wall width', I.range('obj', 'thick', t.thick ?? 34, 5, t.variant === 'U' ? 45 : 98)) + '<p class="hint">Low = thin wall, high = almost a solid block.</p>';
-    if (design) h += row('Design name', I.text('cter', 'name', design.name, `data-i="${design.id}"`)) + `<div class="btns"><button data-act="terAspect">Restore proportions</button><button class="danger" data-act="delTerDesign" data-v="${design.id}">Remove design…</button></div>`;
+    if (design) h += row('Design name', I.text('cter', 'name', design.name, `data-i="${design.id}"`)) + (design.traced ? row('Style', I.sel('special', 'traceStyle', design.traced.style, TRACE_STYLES)) : '') +
+      (inLibrary(design.id) ? `<p class="hint">✓ In your library – available in every battle.</p>` : `<div class="btns"><button data-act="libSave" data-v="${design.id}">Save to library</button></div>`) +
+      `<div class="btns"><button data-act="terAspect">Restore proportions</button><button class="danger" data-act="delTerDesign" data-v="${design.id}">Remove from report…</button></div>`;
     else if (!['building', 'generator', 'landing', 'cathedral'].includes(t.type)) h += `<div class="btns"><button data-act="regen">New random shape</button></div>`;
   }
   return sec('Terrain – ' + esc(label), h) + sec('', commonBtns('ter'));
@@ -1182,7 +1288,35 @@ function multiHTML() {
     row('Rotate', `<span class="btns" style="margin:0">${[-90, -15, 15, 90].map(v => `<button data-act="grot" data-v="${v}" title="Turn the formation ${Math.abs(v)}° ${v < 0 ? 'anti-clockwise' : 'clockwise'}">${v < 0 ? '↺' : '↻'} ${Math.abs(v)}°</button>`).join('')}</span>`) +
     `<p class="hint">${groupMembers(g).length} units. Drag the orange handle to rotate (Shift snaps to 15°). Click a member again to move it on its own.</p><div class="btns"><button data-act="ungroup" title="Ctrl+Shift+G">Ungroup</button></div>`);
   else if (units >= 2) gh = sec('Group', `<p class="hint">Group these units to move them together with a single arrow.</p><div class="btns"><button data-act="group" title="Ctrl+G">Group ${units} units</button></div>`);
-  return gh + multiBody(units);
+  return gh + multiUnitsHTML() + multiBody(units);
+}
+/* Editing every selected unit at once (a group or any multi-selection).
+   Fields where the units differ show "mixed" until a value is chosen. */
+const selUnits = () => ui.sel.filter(s => s.k === 'unit').map(getObj).filter(Boolean);
+const selKey = () => ui.sel.map(s => s.id).join(',');
+const MIXED = '\u0000mixed';
+function commonOf(units, k, def = '') { const v0 = units[0][k] ?? def; return units.every(u => (u[k] ?? def) === v0) ? v0 : MIXED; }
+function multiUnitsHTML() {
+  const us = selUnits(); if (us.length < 2) return '';
+  const c = k => commonOf(us, k), mixOpt = (v, opts) => v === MIXED ? [[MIXED, '— mixed —'], ...opts] : opts;
+  const txt = (k, ph) => { const v = c(k); return I.text('munit', k, v === MIXED ? '' : v, `placeholder="${v === MIXED ? 'Mixed – type to set all' : ph}"`); };
+  const sel = (k, opts, ex = '') => { const v = c(k); return I.sel('munit', k, v, mixOpt(v, opts), ex); };
+  const look = ui.mLookModel === selKey() ? 'model' : commonOf(us, 'look', 'counter'), w = c('w'), h = c('h');
+  let b = row('Type name', txt('name', 'Shown in the legend')) + row('Counter label', txt('label', 'optional, e.g. HQ')) + row('Faction', sel('faction', facOpts()));
+  b += row('Look', I.sel('munit', 'look', look, mixOpt(look, LOOKS), 'data-rp'));
+  if (look === 'counter') b += row('Shape', sel('shape', SHAPES, 'data-rp')) + iconPicker('munit', c('icon') === MIXED ? null : c('icon'));
+  else if (look === 'model') { const art = c('art'), fac = c('faction'); b += artPicker('munit', art === MIXED ? null : art, fac === MIXED ? us[0].faction : fac); }
+  else b += '<p class="hint">These units use different looks. Choose one above to set it for all of them.</p>';
+  b += row('Width' + (w === MIXED ? ' <small>(mixed)</small>' : ''), I.range('munit', 'w', w === MIXED ? us[0].w : w, 8, 240));
+  if (us.some(u => u.shape !== 'circle' || u.look === 'model')) b += row('Height' + (h === MIXED ? ' <small>(mixed)</small>' : ''), I.range('munit', 'h', h === MIXED ? us[0].h : h, 8, 240));
+  return sec(`Edit all ${us.length} units`, `<p class="hint">Changes here apply to every selected unit.</p>` + b);
+}
+function setUnitsField(k, v) {
+  for (const u of selUnits()) {
+    if (k === 'look' && v === 'model' && !u.art) continue;   // keep counters until a drawing is picked
+    u[k] = v;
+    if (u.look !== 'model' && u.shape === 'circle' && (k === 'w' || k === 'shape')) u.h = u.w;
+  }
 }
 function multiBody(units) {
   let h = `<p class="hint">${ui.sel.length} items selected${units ? ` (${units} units)` : ''}. Drag any of them to move the group. Shift-click to add or remove.</p>`;
@@ -1207,7 +1341,7 @@ function resolveTarget(el) {
   const s = ui.sel[0];
   switch (el.dataset.t) {
     case 'doc': return doc; case 'view': return doc.view; case 'ui': return ui; case 'tpl': return ui.tpl;
-    case 'round': return doc.rounds[ui.cur]; case 'fac': return doc.factions[+el.dataset.i]; case 'ref': return doc.ref; case 'logo': return doc.logo;
+    case 'round': return doc.rounds[ui.cur]; case 'fac': return doc.factions[+el.dataset.i]; case 'ref': return doc.ref; case 'logo': return doc.logo; case 'uart': return doc.unitArt.find(a => a.id === el.dataset.i);
     case 'cicon': return doc.customIcons.find(c => c.id === el.dataset.i);
     case 'cter': return doc.customTerrain.find(c => c.id === el.dataset.i);
     case 'obj': case 'unit': return getObj(s);
@@ -1225,17 +1359,36 @@ function onFieldInput(e) {
   else v = el.value;
   const out = el.parentElement && el.parentElement.querySelector('output'); if (out) out.textContent = v;
   if (t === 'special') return special(k, v);
+  if (t === 'munit') {
+    if (v === MIXED) return;
+    const us = selUnits(), arts = [...new Set(us.map(u => u.art).filter(Boolean))];
+    const pendingModel = k === 'look' && v === 'model' && arts.length !== 1 && us.every(u => !u.art || u.look === 'model');
+    if (!pendingModel) {   // choosing "Model drawing" before a drawing is picked changes nothing yet
+      beginEdit('munit:' + k + ':' + selKey());
+      if (k === 'look' && v === 'model' && arts.length === 1) for (const u of us) u.art = arts[0];
+      setUnitsField(k, v);
+    }
+    ui.mLookModel = k === 'look' && v === 'model' && selUnits().some(u => u.look !== 'model') ? selKey() : null;   // show the drawing picker until one is chosen
+    if ('rp' in el.dataset || k === 'faction') renderPanel();
+    render(); return;
+  }
   if (t !== 'ui' && t !== 'tpl') beginEdit(t + ':' + k + ':' + (ui.sel[0]?.id || '') + ':' + (el.dataset.i || ''));
   const obj = resolveTarget(el); if (!obj) return;
   if (t === 'doc' && (k === 'w' || k === 'h')) v = clamp(Math.round(v), 200, 4000);
   if (t === 'gkey') { obj[rid(ui.cur)] = v; render(); return; }
   obj[k] = v;
-  if ((k === 'shape' && v === 'circle') || (k === 'w' && obj.shape === 'circle')) obj.h = obj.w;
+  if (t === 'cter') libSync(obj);
+  if (t === 'uart') libSyncArt(obj);
+  if (obj.look !== 'model' && ((k === 'shape' && v === 'circle') || (k === 'w' && obj.shape === 'circle'))) obj.h = obj.w;
   if (t === 'round') roundsKey = '';
   if ('rp' in el.dataset || (t === 'obj' && k === 'variant')) renderPanel();
   render();
 }
 function special(k, v) {
+  if (k === 'traceStyle') {
+    const t = getObj(ui.sel[0]), c = t && doc.customTerrain.find(x => x.id === t.custom); if (!c || !c.traced) return;
+    pushHistory(); c.traced.style = v; c.markup = tracedMarkup(c.traced.pts, v, c.id, c.traced.seed); libSync(c); render(); return;
+  }
   const u = getObj(ui.sel[0]); if (!u || k !== 'enter') return;
   const ri = +v, first = firstKeyIdx(u); if (ri === first || first < 0) return;
   pushHistory();
@@ -1256,8 +1409,8 @@ function loadPrefs() { try { const p = JSON.parse(localStorage.getItem(PREFS_KEY
 function updateTopbar() { document.querySelectorAll('.toggles input').forEach(el => { el.checked = !!resolveTarget(el)[el.dataset.k]; }); }
 
 const ACT = {
-  icon(b) { if (b.dataset.t === 'unit') { pushHistory(); getObj(ui.sel[0]).icon = b.dataset.v; } else ui.tpl.icon = b.dataset.v; renderPanel(); render(); },
-  tplFrom(b) { const u = doc.units.find(x => x.id === b.dataset.v); if (u) Object.assign(ui.tpl, { faction: u.faction, name: u.name, shape: u.shape, icon: u.icon, w: u.w, h: u.h }); renderPanel(); },
+  icon(b) { if (b.dataset.t === 'unit') { pushHistory(); getObj(ui.sel[0]).icon = b.dataset.v; } else if (b.dataset.t === 'munit') { pushHistory(); for (const u of selUnits()) { u.icon = b.dataset.v; u.look = 'counter'; } } else ui.tpl.icon = b.dataset.v; renderPanel(); render(); },
+  tplFrom(b) { const u = doc.units.find(x => x.id === b.dataset.v); if (u) Object.assign(ui.tpl, { faction: u.faction, name: u.name, look: u.look || 'counter', art: u.art, shape: u.shape, icon: u.icon, w: u.w, h: u.h }); renderPanel(); },
   terType(b) { ui.terrainType = b.dataset.v; renderPanel(); },
   effType(b) { ui.effectType = b.dataset.v; renderPanel(); },
   defArrow(b) { ui.arrowColor = b.dataset.v; renderPanel(); },
@@ -1266,7 +1419,7 @@ const ACT = {
   front: () => reorder(1), back: () => reorder(-1), fwd: () => restack('fwd'), bwd: () => restack('bwd'),
   regen() { pushHistory(); getObj(ui.sel[0]).seed = randSeed(); render(); },
   resetMove() { const u = getObj(ui.sel[0]); pushHistory(); delete u.keys[rid(ui.cur)]; renderPanel(); render(); },
-  applyType() { const u = getObj(ui.sel[0]); pushHistory(); let n = 0; doc.units.forEach(x => { if (x !== u && x.faction === u.faction && x.name.trim().toLowerCase() === u.name.trim().toLowerCase()) { Object.assign(x, { shape: u.shape, icon: u.icon, w: u.w, h: u.h }); n++; } }); render(); toast(`Updated ${n} other unit${n === 1 ? '' : 's'}`); },
+  applyType() { const u = getObj(ui.sel[0]); pushHistory(); let n = 0; doc.units.forEach(x => { if (x !== u && x.faction === u.faction && x.name.trim().toLowerCase() === u.name.trim().toLowerCase()) { Object.assign(x, { look: u.look || 'counter', art: u.art, shape: u.shape, icon: u.icon, w: u.w, h: u.h }); n++; } }); render(); toast(`Updated ${n} other unit${n === 1 ? '' : 's'}`); },
   addFaction() { pushHistory(); doc.factions.push({ id: uid(), name: 'New Faction', color: '#f28c28', ink: '#111111', arrow: '#ffffff' }); renderPanel(); render(); },
   delFaction(b) {
     const i = +b.dataset.i, fa = doc.factions[i]; const used = doc.units.filter(u => u.faction === fa.id).length;
@@ -1291,6 +1444,18 @@ const ACT = {
   logoLoad() { $('#fileLogo').click(); },
   logoClear() { pushHistory(); doc.logo = null; renderPanel(); render(); },
   importTer() { $('#fileTer').click(); },
+  traceStart() { startTrace(); },
+  traceFinish() { finishTrace(); },
+  traceCancel() { cancelTrace(); },
+  libSave(b) { const c = doc.customTerrain.find(x => x.id === b.dataset.v); if (c && libAdd(c)) toast(`“${c.name}” saved to your library`); renderPanel(); },
+  libRemove(b) {
+    const c = library.find(x => x.id === b.dataset.v); if (!c || !confirm(`Remove “${c.name}” from your library? Reports that already use it keep their copy.`)) return;
+    library = library.filter(x => x.id !== c.id); saveLibrary();
+    if (ui.terrainType === 'custom:' + c.id && !doc.customTerrain.some(x => x.id === c.id)) ui.terrainType = 'hill';
+    renderPanel(); render();
+  },
+  libExport() { downloadBlob(new Blob([JSON.stringify({ type: 'battle-report-library', v: 1, designs: library, units: unitLibrary }, null, 1)], { type: 'application/json' }), 'battle-report-library.json'); },
+  libImport() { $('#fileLib').click(); },
   terAspect() { const t = getObj(ui.sel[0]), c = doc.customTerrain.find(x => x.id === t.custom); if (!c) return; const [, , vw, vh] = c.viewBox.split(' ').map(Number); pushHistory(); t.h = Math.round(t.w * vh / vw); renderPanel(); render(); },
   delTerDesign(b) {
     const id = b.dataset.v, used = doc.terrain.filter(t => t.type === 'custom' && t.custom === id).length;
@@ -1351,18 +1516,18 @@ function duplicateSel() {
 const CLIP_KEY = 'battle-report-editor-clip-v1';
 function copySel(cut) {
   if (!ui.sel.length) return false;
-  const items = [], used = new Set(), icons = new Set();
+  const items = [], used = new Set(), icons = new Set(), arts = new Set();
   for (const s of ui.sel) {
     const o = getObj(s); if (!o) continue;
     const c = JSON.parse(JSON.stringify(o));
-    if (s.k === 'unit') { const st = stateAt(o, ui.cur); if (!st || st.status === 'gone') continue; c._st = { x: st.x, y: st.y, rot: st.rot || 0 }; if (c.icon && c.icon.startsWith('c:')) icons.add(c.icon.slice(2)); }
+    if (s.k === 'unit') { const st = stateAt(o, ui.cur); if (!st || st.status === 'gone') continue; c._st = { x: st.x, y: st.y, rot: st.rot || 0 }; if (c.icon && c.icon.startsWith('c:')) icons.add(c.icon.slice(2)); if (c.art) arts.add(c.art); }
     if (s.k === 'ter' && c.type === 'custom') used.add(c.custom);
     items.push({ k: s.k, o: c });
   }
   if (!items.length) return false;
   const ids = new Set(items.map(x => x.o.id));
   const groups = doc.groups.filter(g => presentMembers(g).length && presentMembers(g).every(m => ids.has(m.id))).map(g => JSON.parse(JSON.stringify(g)));
-  ui.clip = { v: 1, items, groups, designs: doc.customTerrain.filter(c => used.has(c.id)), icons: doc.customIcons.filter(c => icons.has(c.id)) }; ui.pasteN = 0;
+  ui.clip = { v: 1, items, groups, designs: doc.customTerrain.filter(c => used.has(c.id)), icons: doc.customIcons.filter(c => icons.has(c.id)), arts: doc.unitArt.filter(a => arts.has(a.id)) }; ui.pasteN = 0;
   try { localStorage.setItem(CLIP_KEY, JSON.stringify(ui.clip)); } catch (err) { /* clipboard stays in memory */ }
   if (cut) { deleteSel(); toast(`Cut ${items.length} item${items.length === 1 ? '' : 's'}`); }
   else toast(`Copied ${items.length} item${items.length === 1 ? '' : 's'}`);
@@ -1377,6 +1542,7 @@ function pasteClip() {
   pushHistory();
   for (const c of clip.designs || []) if (!doc.customTerrain.some(x => x.id === c.id)) doc.customTerrain.push(c);
   for (const c of clip.icons || []) if (!doc.customIcons.some(x => x.id === c.id)) doc.customIcons.push(c);
+  for (const a of clip.arts || []) if (!doc.unitArt.some(x => x.id === a.id)) { const c = cleanArt(a); if (c) doc.unitArt.push(c); }
   for (const g of clip.groups || []) { const ng = { ...JSON.parse(JSON.stringify(g)), id: uid(), name: g.name + ' copy' }; gMap[g.id] = ng.id; doc.groups.push(ng); }
   for (const { k, o } of clip.items) {
     const c = JSON.parse(JSON.stringify(o)); idMap[c.id] = c.id = uid(); delete c.z;
@@ -1428,12 +1594,14 @@ function place(tool, p) {
   const r = rid(ui.cur), x = Math.round(p.x), y = Math.round(p.y); let s;
   pushHistory();
   if (tool === 'unit') {
-    const t = ui.tpl, u = { id: uid(), faction: t.faction, name: t.name, label: '', shape: t.shape, icon: t.icon, w: t.w, h: t.shape === 'circle' ? t.w : t.h, keys: { [r]: { x, y, rot: 0, status: 'active' } } };
+    if (ui.tpl.look === 'model' && ui.tpl.art) ensureArt(ui.tpl.art);
+    const t = ui.tpl, model = t.look === 'model' && artById(t.art), u = { id: uid(), faction: t.faction, name: t.name, label: '', shape: t.shape, icon: t.icon, ...(model ? { look: 'model', art: t.art } : {}), w: t.w, h: t.shape === 'circle' && !model ? t.w : t.h, keys: { [r]: { x, y, rot: 0, status: 'active' } } };
     doc.units.push(u); s = { k: 'unit', id: u.id };
   } else if (tool === 'terrain') {
     const [type, variant] = ui.terrainType.split(':'); let t;
     if (type === 'custom') {
-      const c = doc.customTerrain.find(x => x.id === variant); if (!c) return;
+      const c = designById(variant); if (!c) return;
+      if (!doc.customTerrain.some(x => x.id === c.id)) doc.customTerrain.push(JSON.parse(JSON.stringify(c)));
       const [, , vw, vh] = c.viewBox.split(' ').map(Number), k = 180 / Math.max(vw, vh);
       t = { id: uid(), type, custom: c.id, x, y, w: Math.round(vw * k), h: Math.round(vh * k), rot: 0, seed: 1 };
     } else if (PATH_TYPES.has(type)) t = { id: uid(), type, points: [[x - 130, y - 20], [x, y + 12], [x + 130, y - 8]], width: { river: 32, road: 24, wall: 9 }[type], seed: 1 };
@@ -1470,6 +1638,7 @@ svg.addEventListener('pointerdown', e => {
   }
   if (e.button !== 0) return;
   const p = toMap(e);
+  if (ui.trace) { traceClick(p, e.shiftKey); return; }
   const h = e.target.closest('[data-handle]');
   if (h) {
     ui.drag = { type: 'handle', h: h.dataset.handle, pushed: false };
@@ -1505,7 +1674,8 @@ svg.addEventListener('pointerdown', e => {
   svg.setPointerCapture(e.pointerId);
 });
 svg.addEventListener('pointermove', e => {
-  const d = ui.drag; if (!d) return;
+  const d = ui.drag;
+  if (!d) { if (ui.trace) { ui.trace.cur = traceSnap(toMap(e), e.shiftKey); skel.ovG.innerHTML = overlaySVG(); } return; }
   if (d.type === 'pan') { scroller.scrollLeft = d.sl - (e.clientX - d.cx); scroller.scrollTop = d.st - (e.clientY - d.cy); return; }
   const p = toMap(e);
   if (d.type === 'move') {
@@ -1583,6 +1753,7 @@ function applyHandle(h, p, e) {
   else if (h.startsWith('pt:')) o.points[+h.slice(3)] = [Math.round(p.x), Math.round(p.y)];
 }
 svg.addEventListener('dblclick', e => {
+  if (ui.trace) { finishTrace(); return; }
   const h = e.target.closest('[data-handle]');
   if (h && h.dataset.handle.startsWith('pt:')) {
     const o = getObj(ui.sel[0]); if (o.points.length <= 2) return toast('A path needs at least two points');
@@ -1599,7 +1770,7 @@ svg.addEventListener('dblclick', e => {
 
 /* ------------------------------ Tools ----------------------------------- */
 function setTool(t, quiet) {
-  ui.tool = t;
+  if (t !== ui.tool) ui.trace = null; ui.tool = t;
   document.querySelectorAll('.tool').forEach(b => b.classList.toggle('on', b.dataset.tool === t));
   if (!quiet) { renderPanel(); render(); }
 }
@@ -1607,6 +1778,7 @@ $('#tools').addEventListener('click', e => { const b = e.target.closest('[data-t
 
 /* ------------------------------ Keyboard -------------------------------- */
 document.addEventListener('keydown', e => {
+  if (artEditorActive()) { artEditorKey(e); return; }
   const el = e.target, tag = el.tagName;
   const typing = (tag === 'INPUT' && !['checkbox', 'color', 'button'].includes(el.type)) || tag === 'TEXTAREA' || tag === 'SELECT';
   const mod = e.ctrlKey || e.metaKey;
@@ -1624,6 +1796,11 @@ document.addEventListener('keydown', e => {
   if (mod && key === 'g') { e.preventDefault(); e.shiftKey ? ungroupSel() : groupSel(); return; }
   if (mod && key === 'a') { e.preventDefault(); ui.sel = doc.units.filter(u => { const s = stateAt(u, ui.cur); return s && s.status !== 'gone'; }).map(u => ({ k: 'unit', id: u.id })); renderPanel(); render(); return; }
   if (mod) return;
+  if (ui.trace) {
+    if (e.key === 'Enter') { e.preventDefault(); finishTrace(); return; }
+    if (e.key === 'Escape') { e.preventDefault(); cancelTrace(); return; }
+    if (e.key === 'Backspace' || e.key === 'Delete') { e.preventDefault(); ui.trace.pts.pop(); renderPanel(); render(); return; }
+  }
   const step = e.shiftKey ? 10 : 1;
   switch (e.key) {
     case 'Delete': case 'Backspace': e.preventDefault(); deleteSel(); return;
@@ -1889,6 +2066,17 @@ $('#fileIcon').onchange = async e => {
   toast(errors.length ? 'Could not import ' + errors.join('; ') : `Imported ${added.length} symbol${added.length === 1 ? '' : 's'}`);
 };
 
+$('#fileLib').onchange = async e => {
+  const file = e.target.files[0]; e.target.value = ''; if (!file) return;
+  try {
+    const d = JSON.parse(await file.text()), list = Array.isArray(d) ? d : d && d.designs, units = d && Array.isArray(d.units) ? d.units : [];
+    if (!Array.isArray(list) && !units.length) throw new Error('not a library file');
+    let added = 0, updated = 0;
+    for (const raw of (list || []).filter(isDesign)) { const c = cleanDesign(raw), i = library.findIndex(x => x.id === c.id); if (i >= 0) { library[i] = c; updated++; } else { library.push(c); added++; } }
+    for (const raw of units) { const a = cleanArt(raw); if (!a) continue; const i = unitLibrary.findIndex(x => x.id === a.id); if (i >= 0) { unitLibrary[i] = a; updated++; } else { unitLibrary.push(a); added++; } }
+    saveLibrary(); renderPanel(); toast(`Library: ${added} added${updated ? `, ${updated} updated` : ''}`);
+  } catch (err) { toast('Could not import library: ' + err.message); }
+};
 $('#fileTer').onchange = async e => {
   const files = [...e.target.files]; e.target.value = ''; if (!files.length) return;
   const added = [], errors = [];
@@ -1910,7 +2098,7 @@ function toast(msg) { const t = $('#toast'); t.textContent = msg; t.classList.ad
 (async function init() {
   let failed;
   try { failed = await loadAssets(); } catch (err) { showFatal(err); return; }
-  loadPrefs();
+  loadPrefs(); loadLibrary();
   let saved = null;
   try { saved = JSON.parse(localStorage.getItem(STORE) || 'null'); } catch (err) { saved = null; }
   doc = saved && Array.isArray(saved.rounds) ? normalize(saved) : demoDoc();
