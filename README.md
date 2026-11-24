@@ -20,7 +20,9 @@ Then open http://localhost:8000/ in your browser. Stop the server with Ctrl+C.
 | `index.html` | Page layout |
 | `css/editor.css` | Styles |
 | `js/editor.js` | Editor code |
-| `js/unit-art.js` | Model drawings and the drawing editor |
+| `js/drawing.js` | Shapes shared by model drawings and drawn buildings |
+| `js/unit-art.js` | Model drawings for units |
+| `js/drawing-editor.js` | The drawing editor (models and buildings) |
 | `icons/` | Toolbar and logo icons |
 | `symbols/*.svg` | Unit symbols, one file each |
 | `symbols/symbols.json` | Picker groups and order |
@@ -29,6 +31,12 @@ Then open http://localhost:8000/ in your browser. Stop the server with Ctrl+C.
 | `terrain/terrain.json` | Which building and sprite files are used |
 
 Hills, lakes, marshes, craters, the buildings with adjustable wall thickness, rivers, roads and walls are still generated in `js/editor.js`.
+
+## Terrain tips
+
+- The Terrain tool stays on after you place something, so you can place many pieces in a row.
+- For woods, rocks and cacti, drag around an area on the map to fill it. A single click places a default-size patch.
+- **Trace building** works like tracing a model: click the outline on the map, then add details in the drawing editor. **Draw building…** starts from a blank canvas. In the editor, building shapes have their own colours and edge styles (solid, ruined walls, hazard stripes).
 
 ## Editing the SVGs
 
@@ -53,9 +61,11 @@ Projects you save (`.battle.json`) store symbol names only. If you change a symb
 
 In the unit panel, set **Look** to **Model drawing** to show a unit as a drawing (for example a top-down tank) instead of a counter. There are three ways to get one:
 
-- **Draw new…** opens the drawing editor. It has rectangle, ellipse, polygon and line tools, mirrored copies, and an optional photo to trace over.
+- **Draw new…** opens the drawing editor. It has rectangle, ellipse, polygon and line tools. You can rotate shapes (orange handle, or the ↺/↻ buttons), make mirrored copies, and load a photo to trace over. **Download SVG** saves the drawing.
 - **Trace on map** lets you click the model's outline on the map or reference photo. The drawing editor then opens with the photo behind it.
 - **Upload SVG…** uses an SVG file. Single-colour SVGs are recoloured with the faction colour.
+
+To save a placed unit as an SVG file, select it and click **Download SVG**.
 
 Drawn models use relative colours (faction colour, darker, lighter), so one drawing works for every army. Models face right.
 

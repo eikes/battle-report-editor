@@ -305,6 +305,27 @@ function scatter(R, rx, ry, n, minD, margin) {
   }
   return pts.sort((a, b) => a[1] - b[1]);
 }
+/* Area fill: woods, rock fields and cacti can follow an outline drawn on the map.
+   t.area holds the outline as fractions of t.w / t.h (so resizing and rotating still work). */
+const AREA_TYPES = new Set(['wood', 'rocks', 'cacti']);
+const areaPoly = t => t.area.map(([u, v]) => [u * t.w, v * t.h]);
+const polyArea = P => P.reduce((a, p, i) => { const q = P[(i + 1) % P.length]; return a + p[0] * q[1] - q[0] * p[1]; }, 0) / 2;
+function segDist(p, a, b) { const L2 = (b[0] - a[0]) ** 2 + (b[1] - a[1]) ** 2 || 1, k = clamp(((p[0] - a[0]) * (b[0] - a[0]) + (p[1] - a[1]) * (b[1] - a[1])) / L2, 0, 1); return Math.hypot(p[0] - a[0] - k * (b[0] - a[0]), p[1] - a[1] - k * (b[1] - a[1])); }
+function scatterPoly(R, P, n, minD, margin) {
+  const xs = P.map(p => p[0]), ys = P.map(p => p[1]), x0 = Math.min(...xs), y0 = Math.min(...ys), W = Math.max(...xs) - x0, H = Math.max(...ys) - y0, pts = [];
+  for (let tries = 0; pts.length < n && tries < n * 60; tries++) {
+    const q = [x0 + R() * W, y0 + R() * H];
+    if (!pip(q, P) || P.some((a, i) => segDist(q, a, P[(i + 1) % P.length]) < margin) || pts.some(p => Math.hypot(p[0] - q[0], p[1] - q[1]) < minD)) continue;
+    pts.push(q);
+  }
+  return pts.sort((a, b) => a[1] - b[1]);
+}
+// Pieces for an area: `per` = map area per piece at density 1.
+function fillPts(t, R, per, minD, margin, minN = 1) {
+  const dens = t.density ?? 1;
+  if (!t.area) { const rx = t.w / 2, ry = t.h / 2; return scatter(R, rx, ry, Math.max(minN, Math.round(dens * Math.PI * rx * ry / per)), minD, margin); }
+  const P = areaPoly(t); return scatterPoly(R, P, Math.max(minN, Math.round(dens * Math.abs(polyArea(P)) / per)), minD, margin);
+}
 function fatArrowPath(x1, y1, x2, y2, bend, w, taper, wob = 0) {
   const dx = x2 - x1, dy = y2 - y1, L = Math.hypot(dx, dy) || 1, nx = -dy / L, ny = dx / L;
   const cx = (x1 + x2) / 2 + nx * bend, cy = (y1 + y2) / 2 + ny * bend;
@@ -429,28 +450,24 @@ function roundTitleSVG(W, name, pad = 20) {
    The library lives in this browser (localStorage) and is shared by every battle;
    placing a library design copies it into the project so the file stays complete. */
 const TRACE_STYLES = [['building', 'Building (grey)'], ['ruin', 'Ruin (stone, broken walls)'], ['platform', 'Platform (hazard edge)']];
-function tracedMarkup(pts, style, id, seed) {
-  const P = pts.map(p => f(p[0]) + ',' + f(p[1])).join(' '), poly = a => `<polygon points="${P}" ${a}/>`;
-  const shadow = poly('transform="translate(5,5)" fill="#000000" opacity=".22"');
-  if (style === 'ruin') {
-    const R = rng(seed || 1), dash = []; for (let i = 0; i < 10; i++) dash.push(f(25 + R() * 70), f(6 + R() * 16));
-    const pid = `tr${id}-tiles`, da = `stroke-dasharray="${dash.join(' ')}" stroke-linejoin="round"`;
-    return `<defs><pattern id="${pid}" width="14" height="14" patternUnits="userSpaceOnUse"><path d="M14 0H0V14" fill="none" stroke="#5b5348" stroke-opacity=".28" stroke-width="1"/></pattern></defs>` +
-      shadow + poly('fill="#c4bba6"') + poly(`fill="url(#${pid})"`) + poly(`fill="none" stroke="#2a2622" stroke-width="8" ${da}`) + poly(`fill="none" stroke="#8d867b" stroke-width="4.5" ${da}`);
-  }
-  if (style === 'platform') return shadow + poly('fill="#8e959d"') + poly('fill="none" stroke="#111111" stroke-width="7" stroke-linejoin="round"') + poly('fill="none" stroke="#ffd21f" stroke-width="7" stroke-dasharray="9 9" stroke-linejoin="round"') + poly('fill="none" stroke="#1d2025" stroke-width="1.5" stroke-linejoin="round"');
-  return shadow + poly('fill="#8c9297" stroke="#2a2e33" stroke-width="3" stroke-linejoin="miter"');
-}
 const LIB_KEY = 'battle-report-editor-library-v1';
 let library = [], unitLibrary = [];   // building designs, model drawings
-const isDesign = c => c && typeof c.id === 'string' && typeof c.viewBox === 'string' && (typeof c.markup === 'string' || c.traced);
+const isDesign = c => c && typeof c.id === 'string' && typeof c.viewBox === 'string' && (typeof c.markup === 'string' || c.traced || Array.isArray(c.parts));
 // Rebuilds a design's markup from trusted parts: traced points, or the SVG sanitizer.
 function cleanDesign(c) {
   const out = { id: String(c.id).replace(/[^\w-]/g, '').slice(0, 40) || uid(), name: String(c.name || 'Building').slice(0, 60), viewBox: String(c.viewBox) };
+  // Drawn buildings (and buildings traced with older versions) are rebuilt from their shapes.
+  let parts = Array.isArray(c.parts) ? c.parts.map(cleanPart).filter(Boolean) : null;
   const t = c.traced;
-  if (t && Array.isArray(t.pts) && t.pts.length >= 3 && t.pts.every(p => Array.isArray(p) && isFinite(p[0]) && isFinite(p[1]))) {
-    const style = TRACE_STYLES.some(([k]) => k === t.style) ? t.style : 'building', seed = +t.seed || 1;
-    out.traced = { pts: t.pts.map(p => [+p[0], +p[1]]), style, seed }; out.markup = tracedMarkup(out.traced.pts, style, out.id, seed);
+  if (!parts && t && Array.isArray(t.pts) && t.pts.length >= 3 && t.pts.every(p => Array.isArray(p) && isFinite(p[0]) && isFinite(p[1]))) {
+    const xs = t.pts.map(p => +p[0]), ys = t.pts.map(p => +p[1]), cx = (Math.min(...xs) + Math.max(...xs)) / 2, cy = (Math.min(...ys) + Math.max(...ys)) / 2;
+    parts = [{ t: 'poly', pts: t.pts.map(p => [+p[0] - cx, +p[1] - cy]), ...({ ruin: { paint: 'tiles', edge: 'broken' }, platform: { paint: 'metal', edge: 'hazard' } }[t.style] || { paint: 'wall', edge: 'solid' }) }];
+  }
+  if (parts) {
+    if (!parts.length) throw new Error('empty drawing');
+    Object.assign(out, { kind: 'drawn', parts, seed: +c.seed || (t && +t.seed) || 1, rev: +c.rev || 0 });
+    if (Array.isArray(c.origin) && c.origin.length === 2 && c.origin.every(v => isFinite(v))) out.origin = [+c.origin[0], +c.origin[1]];
+    return finalizeBuilding(out);
   } else out.markup = importSvgIcon(`<svg xmlns="http://www.w3.org/2000/svg" viewBox="${esc(out.viewBox)}">${c.markup}</svg>`, out.name).markup;
   return out;
 }
@@ -488,19 +505,7 @@ function finishTrace() {
   const pts = t.pts.filter((p, i, a) => !i || Math.hypot(p[0] - a[i - 1][0], p[1] - a[i - 1][1]) >= 1);
   if (pts.length < 3) return toast('Click at least three corners first');
   if (t.kind === 'unit') return finishUnitTrace(pts);
-  const r1 = v => Math.round(v * 10) / 10, xs = pts.map(p => p[0]), ys = pts.map(p => p[1]);
-  const x0 = Math.min(...xs), y0 = Math.min(...ys), w = r1(Math.max(...xs) - x0), h = r1(Math.max(...ys) - y0);
-  if (w < 4 || h < 4) return toast('That outline is too small');
-  const id = uid(), style = ui.traceStyle || 'building', seed = randSeed(), rel = pts.map(([x, y]) => [r1(x - x0), r1(y - y0)]);
-  const n = new Set([...doc.customTerrain, ...library].filter(c => c.traced).map(c => c.id)).size + 1;
-  const c = { id, name: 'Traced building ' + n, viewBox: `0 0 ${w} ${h}`, traced: { pts: rel, style, seed } };
-  c.markup = tracedMarkup(rel, style, id, seed);
-  pushHistory(); doc.customTerrain.push(c);
-  const piece = { id: uid(), type: 'custom', custom: id, x: r1(x0 + w / 2), y: r1(y0 + h / 2), w, h, rot: 0, seed: 1 };
-  doc.terrain.push(piece); ui.trace = null; ui.terrainType = 'custom:' + id;
-  const saved = libAdd(c);
-  setTool('select', true); ui.sel = [{ k: 'ter', id: piece.id }]; renderPanel(); render();
-  toast(saved ? 'Building traced and saved to your library' : 'Building traced');
+  finishBuildingTrace(pts);
 }
 
 /* terrain */
@@ -530,7 +535,7 @@ function pip(pt, poly) { let inside = false; for (let i = 0, j = poly.length - 1
 function areaTerrain(t) {
   if (t.type === 'custom') return customTerrainSVG(t);
   if (TERRAIN_ART[t.type]) return artSVG(TERRAIN_ART[t.type], t);
-  const key = [t.type, t.variant, t.w, t.h, t.seed, t.levels, t.density, t.thick].join('|');
+  const key = [t.type, t.variant, t.w, t.h, t.seed, t.levels, t.density, t.thick].join('|') + (t.area ? '|' + JSON.stringify(t.area) : '');
   if (terCache.has(key)) return terCache.get(key);
   if (terCache.size > 400) terCache.clear();
   const rx = t.w / 2, ry = t.h / 2, R = rng(t.seed || 1), dens = t.density ?? 1; let s = '';
@@ -544,14 +549,12 @@ function areaTerrain(t) {
       break;
     }
     case 'wood': {
-      const tr = 11, n = Math.max(1, Math.round(dens * Math.PI * rx * ry / (tr * tr * 3.2)));
-      const pts = scatter(R, rx, ry, n, tr * 1.15, tr * .6);
+      const tr = 11, pts = fillPts(t, R, tr * tr * 3.2, tr * 1.15, tr * .6);
       s = scatterSprites('tree', pts.map(([x, y]) => ({ x, y, size: 2 * tr * (.8 + R() * .45), rot: R() * 360 })), R);
       break;
     }
     case 'rocks': {
-      const n = Math.max(3, Math.round(dens * Math.PI * rx * ry / 420));
-      s = scatterSprites('rock', scatter(R, rx, ry, n, 13, 8).map(([x, y]) => ({ x, y, size: 2 * (6 + R() * 8), rot: R() * 360 })), R);
+      s = scatterSprites('rock', fillPts(t, R, 420, 13, 8, 3).map(([x, y]) => ({ x, y, size: 2 * (6 + R() * 8), rot: R() * 360 })), R);
       break;
     }
     case 'lake':
@@ -569,9 +572,8 @@ function areaTerrain(t) {
       s = `<path d="${blob(t.seed, rx, ry, 10, .15)}" fill="#7c9b34" stroke="#465d1a" stroke-width="2.2"/><path d="${blob(t.seed + 3, rx * .62, ry * .58, 9, .2, rx * .05, ry * .08)}" fill="#5b7522"/><path d="${blob(t.seed + 5, rx * .3, ry * .25, 7, .2, rx * .1, ry * .14)}" fill="#4a601b"/>`;
       break;
     case 'cacti': {
-      s = `<path d="${blob(t.seed, rx, ry, 11, .25)}" fill="#c2a55a" opacity=".35"/>`;
-      const n = Math.max(1, Math.round(dens * Math.PI * rx * ry / 520));
-      s += scatterSprites('cactus', scatter(R, rx, ry, n, 24, 12).map(([x, y]) => ({ x, y, size: 2 * (9 + R() * 7), rot: R() * 360 })), R);
+      s = `<path d="${t.area ? smoothClosed(areaPoly(t)) : blob(t.seed, rx, ry, 11, .25)}" fill="#c2a55a" opacity=".35"/>`;
+      s += scatterSprites('cactus', fillPts(t, R, 520, 24, 12).map(([x, y]) => ({ x, y, size: 2 * (9 + R() * 7), rot: R() * 360 })), R);
       break;
     }
     case 'crystal': {
@@ -626,7 +628,7 @@ function pathTerrainSVG(t, ed) {
 }
 function terrainItemSVG(t, ed) {
   if (PATH_TYPES.has(t.type)) return pathTerrainSVG(t, ed);
-  const hit = !ed ? '' : ['custom', 'generator', 'building', 'cathedral'].includes(t.type) ? `<rect x="${-t.w / 2}" y="${-t.h / 2}" width="${t.w}" height="${t.h}" fill="#000" fill-opacity="0"/>` : `<ellipse rx="${t.w / 2}" ry="${t.h / 2}" fill="#000" fill-opacity="0"/>`;
+  const hit = !ed ? '' : t.area ? `<polygon points="${areaPoly(t).map(p => f(p[0]) + ',' + f(p[1])).join(' ')}" fill="#000" fill-opacity="0"/>` : ['custom', 'generator', 'building', 'cathedral'].includes(t.type) ? `<rect x="${-t.w / 2}" y="${-t.h / 2}" width="${t.w}" height="${t.h}" fill="#000" fill-opacity="0"/>` : `<ellipse rx="${t.w / 2}" ry="${t.h / 2}" fill="#000" fill-opacity="0"/>`;
   return `<g transform="translate(${f(t.x)},${f(t.y)}) rotate(${t.rot || 0})">${hit}${areaTerrain(t)}</g>`;
 }
 function terrainSVG(ed) { return doc.terrain.map(t => `<g${ed ? ` data-sel="ter:${t.id}"` : ''}>${terrainItemSVG(t, ed)}</g>`).join(''); }
@@ -964,7 +966,7 @@ function render() {
   skel.mapG.setAttribute('transform', `translate(${L.mapX},${L.mapY})`);
   skel.frame.setAttribute('width', doc.w); skel.frame.setAttribute('height', doc.h);
   setIf(skel.bgG, bgSVG());
-  const tk = JSON.stringify(doc.terrain) + doc.customTerrain.map(c => c.id + ':' + c.markup.length + ':' + (c.traced ? c.traced.style : '')).join();
+  const tk = JSON.stringify(doc.terrain) + doc.customTerrain.map(c => c.id + ':' + (c.rev || 0) + ':' + c.markup.length).join();
   if (tk !== terKey) { skel.terG.innerHTML = terrainSVG(true); terKey = tk; }
   skel.terG.classList.toggle('locked', !!ui.lockTerrain);
   setIf(skel.refG, refSVG(false));
@@ -1047,6 +1049,7 @@ function overlaySVG() {
     const tu = unitAt(d.cur, d.from), tmp = { kind: ui.shotKind, from: d.from, x1: d.start.x, y1: d.start.y, to: tu ? tu.id : null, x2: d.cur.x, y2: d.cur.y, width: 1, impact: true, seed: 3 };
     o += `<g opacity=".8">${shotSVG(tmp, shotGeom(tmp))}</g>`;
   }
+  if (d && d.type === 'lasso' && d.pts.length > 1) o += `<path d="M${d.pts.map(q => f(q[0]) + ',' + f(q[1])).join('L')}Z" fill="#3dac3d" fill-opacity=".25" stroke="#0a84ff" stroke-width="${f(sw * 1.4)}" stroke-dasharray="${f(6 / z)} ${f(4 / z)}" stroke-linejoin="round" pointer-events="none"/>`;
   if (d && d.type === 'draw' && d.pts.length > 1) o += `<g opacity=".8">${magicSVG({ points: d.pts, style: ui.magicStyle, width: 8, jag: 0 })}</g>`;
   if (d && d.type === 'newarrow' && Math.hypot(d.cur.x - d.start.x, d.cur.y - d.start.y) > 8) o += `<g opacity=".7">${fatArrowSVG({ x1: d.start.x, y1: d.start.y, x2: d.cur.x, y2: d.cur.y, bend: 0 }, 18, ui.arrowColor, { wobble: ui.arrowWobble || 0 })}</g>`;
   if (ui.trace) {
@@ -1154,7 +1157,7 @@ function traceHTML() {
   return sec(unit ? 'Trace a model' : 'Trace a building', `<p class="hint">Click each corner of the ${unit ? 'model' : 'building'}'s outline. Hold <kbd>Shift</kbd> to keep walls at 15° steps. Finish by clicking the yellow first corner, double-clicking, or pressing <kbd>Enter</kbd>. <kbd>Backspace</kbd> removes the last corner, <kbd>Esc</kbd> cancels.</p>` +
         (unit ? '' : row('Style', I.sel('ui', 'traceStyle', ui.traceStyle || 'building', TRACE_STYLES))) + `<p class="hint">${ui.trace.pts.length} corner${ui.trace.pts.length === 1 ? '' : 's'} so far.${doc.ref ? '' : ' Tip: load a photo of your table under Reference image (click empty map with the Select tool) and trace over it.'}</p>` +
         `<div class="btns"><button data-act="traceFinish"${ui.trace.pts.length < 3 ? ' disabled' : ''}>Finish</button><button data-act="traceCancel">Cancel</button></div>`) +
-    (unit ? sec('', '<p class="hint">The outline becomes the model’s body; the drawing editor then opens with your photo behind it so you can add turrets, tracks and details.</p>') : '');
+    sec('', `<p class="hint">${unit ? 'The outline becomes the model’s body' : 'The outline becomes the floor plan'}; the drawing editor then opens with your photo behind it so you can add ${unit ? 'turrets, tracks and details' : 'rooms, walls, roofs and details'}.</p>`);
 }
 function toolOptionsHTML() {
   switch (ui.tool) {
@@ -1167,10 +1170,10 @@ function toolOptionsHTML() {
     case 'terrain': {
       const pick = c => `<button data-act="terType" data-v="custom:${c.id}" class="${'custom:' + c.id === ui.terrainType ? 'on' : ''}">${terrainPreview('custom:' + c.id)}${esc(c.name)}</button>`;
       const libSel = ui.terrainType.startsWith('custom:') ? library.find(c => 'custom:' + c.id === ui.terrainType) : null;
-      return sec('Place terrain', `<p class="hint">Choose a feature, then click the map. Terrain is shared by every round.</p><div class="pal">${TER_PALETTE.map(([k, l]) => `<button data-act="terType" data-v="${k}" class="${k === ui.terrainType ? 'on' : ''}">${terrainPreview(k)}${l}</button>`).join('')}</div>`) +
-        sec('Buildings in this report', `<p class="hint">Trace a building by clicking its corners on the map, or import a top-down plan as .svg (e.g. drawn in Inkscape). Saved in the project file.</p>` +
+      return sec('Place terrain', `<p class="hint">Choose a feature, then click the map – the tool stays on, so you can place many in a row. For woods, rocks and cacti, <b>drag around an area</b> to fill it. Terrain is shared by every round.</p><div class="pal">${TER_PALETTE.map(([k, l]) => `<button data-act="terType" data-v="${k}" class="${k === ui.terrainType ? 'on' : ''}">${terrainPreview(k)}${l}</button>`).join('')}</div>`) +
+        sec('Buildings in this report', `<p class="hint">Trace a building's outline on the map and add details in the drawing editor, draw one from scratch, or import a top-down plan as .svg. Saved in the project file.</p>` +
           (doc.customTerrain.length ? `<div class="pal">${doc.customTerrain.map(pick).join('')}</div>` : '') +
-          `<div class="btns"><button data-act="traceStart">Trace building</button><button data-act="importTer">Import SVG…</button></div>`) +
+          `<div class="btns"><button data-act="traceStart">Trace building</button><button data-act="bldNew">Draw building…</button><button data-act="importTer">Import SVG…</button></div>`) +
         sec('Your library', `<p class="hint">Kept in this browser and available in every battle. Traced buildings are added automatically; select any other building and choose “Save to library”. Export and import also include your model drawings${unitLibrary.length ? ` (${unitLibrary.length})` : ''}.</p>` +
           (library.length ? `<div class="pal">${library.map(pick).join('')}</div>` : '<p class="hint">Empty so far.</p>') +
           (libSel ? `<div class="btns"><button class="danger" data-act="libRemove" data-v="${libSel.id}">Remove “${esc(libSel.name)}” from library</button></div>` : '') +
@@ -1210,6 +1213,7 @@ function unitPanel(u) {
     lookRows('unit', u) +
     row('Width', I.range('unit', 'w', u.w, 8, 240)) + (u.shape !== 'circle' || u.look === 'model' ? row('Height', I.range('unit', 'h', u.h, 8, 240)) : '') +
 
+    `<div class="btns"><button data-act="unitSvg" title="Download this unit as it looks now (counter or model) as an .svg file">Download SVG</button></div>` +
     (u.name ? `<div class="btns"><button data-act="applyType" title="Copy shape, icon and size to every unit with this type name and faction">Apply look to all “${esc(u.name)}”</button></div>` : ''));
   let r = '';
   if (!st) r += `<p class="hint">Not on the table yet – enters in “${esc(doc.rounds[first]?.name)}”.</p>`;
@@ -1238,7 +1242,8 @@ function terrainPanel(t) {
     if (['wood', 'rocks', 'marsh', 'cacti', 'crystal'].includes(t.type)) h += row('Density', I.range('obj', 'density', t.density ?? 1, .2, 2, .1));
     if (t.type === 'building') h += row('Shape', I.sel('obj', 'variant', t.variant || 'block', BUILDINGS));
     if (t.type === 'building' && ['L', 'T', 'cross', 'U'].includes(t.variant)) h += row('Wall width', I.range('obj', 'thick', t.thick ?? 34, 5, t.variant === 'U' ? 45 : 98)) + '<p class="hint">Low = thin wall, high = almost a solid block.</p>';
-    if (design) h += row('Design name', I.text('cter', 'name', design.name, `data-i="${design.id}"`)) + (design.traced ? row('Style', I.sel('special', 'traceStyle', design.traced.style, TRACE_STYLES)) : '') +
+    if (design) h += row('Design name', I.text('cter', 'name', design.name, `data-i="${design.id}"`)) +
+      `<div class="btns">${design.parts ? `<button data-act="bldEdit" data-v="${design.id}">Edit drawing…</button>` : ''}<button data-act="bldSvg" data-v="${design.id}">Download SVG</button></div>` +
       (inLibrary(design.id) ? `<p class="hint">✓ In your library – available in every battle.</p>` : `<div class="btns"><button data-act="libSave" data-v="${design.id}">Save to library</button></div>`) +
       `<div class="btns"><button data-act="terAspect">Restore proportions</button><button class="danger" data-act="delTerDesign" data-v="${design.id}">Remove from report…</button></div>`;
     else if (!['building', 'generator', 'landing', 'cathedral'].includes(t.type)) h += `<div class="btns"><button data-act="regen">New random shape</button></div>`;
@@ -1385,10 +1390,6 @@ function onFieldInput(e) {
   render();
 }
 function special(k, v) {
-  if (k === 'traceStyle') {
-    const t = getObj(ui.sel[0]), c = t && doc.customTerrain.find(x => x.id === t.custom); if (!c || !c.traced) return;
-    pushHistory(); c.traced.style = v; c.markup = tracedMarkup(c.traced.pts, v, c.id, c.traced.seed); libSync(c); render(); return;
-  }
   const u = getObj(ui.sel[0]); if (!u || k !== 'enter') return;
   const ri = +v, first = firstKeyIdx(u); if (ri === first || first < 0) return;
   pushHistory();
@@ -1445,6 +1446,7 @@ const ACT = {
   logoClear() { pushHistory(); doc.logo = null; renderPanel(); render(); },
   importTer() { $('#fileTer').click(); },
   traceStart() { startTrace(); },
+  unitSvg() { const u = getObj(ui.sel[0]); if (!u) return; const [w, h] = dims(u), pad = 3; downloadSVGFile(u.name || 'Unit', [-w / 2 - pad, -h / 2 - pad, w + 2 * pad, h + 2 * pad], unitShapeSVG(u)); },
   traceFinish() { finishTrace(); },
   traceCancel() { cancelTrace(); },
   libSave(b) { const c = doc.customTerrain.find(x => x.id === b.dataset.v); if (c && libAdd(c)) toast(`“${c.name}” saved to your library`); renderPanel(); },
@@ -1590,6 +1592,15 @@ function nudge(dx, dy) {
 }
 
 /* ---------------------------- Placement --------------------------------- */
+// Fills an outline drawn on the map with the chosen terrain (wood, rocks, cacti).
+function placeArea(raw) {
+  const pts = raw.filter((q, i, a) => !i || Math.hypot(q[0] - a[i - 1][0], q[1] - a[i - 1][1]) >= 6);
+  if (pts.length < 3) return;
+  const xs = pts.map(q => q[0]), ys = pts.map(q => q[1]), x0 = Math.min(...xs), y0 = Math.min(...ys), w = Math.max(...xs) - x0, h = Math.max(...ys) - y0;
+  const r3 = v => Math.round(v * 1000) / 1000, t = { id: uid(), type: ui.terrainType, x: Math.round(x0 + w / 2), y: Math.round(y0 + h / 2), w: Math.round(w), h: Math.round(h), rot: 0, seed: randSeed(), levels: 2, density: 1 };
+  t.area = pts.map(([x, y]) => [r3((x - t.x) / t.w), r3((y - t.y) / t.h)]);
+  pushHistory(); doc.terrain.push(t); ui.sel = [{ k: 'ter', id: t.id }]; renderPanel(); render();
+}
 function place(tool, p) {
   const r = rid(ui.cur), x = Math.round(p.x), y = Math.round(p.y); let s;
   pushHistory();
@@ -1602,7 +1613,7 @@ function place(tool, p) {
     if (type === 'custom') {
       const c = designById(variant); if (!c) return;
       if (!doc.customTerrain.some(x => x.id === c.id)) doc.customTerrain.push(JSON.parse(JSON.stringify(c)));
-      const [, , vw, vh] = c.viewBox.split(' ').map(Number), k = 180 / Math.max(vw, vh);
+      const [, , vw, vh] = c.viewBox.split(' ').map(Number), k = c.parts ? 1 : 180 / Math.max(vw, vh);   // drawn buildings are in map pixels
       t = { id: uid(), type, custom: c.id, x, y, w: Math.round(vw * k), h: Math.round(vh * k), rot: 0, seed: 1 };
     } else if (PATH_TYPES.has(type)) t = { id: uid(), type, points: [[x - 130, y - 20], [x, y + 12], [x + 130, y - 8]], width: { river: 32, road: 24, wall: 9 }[type], seed: 1 };
     else { const S = { hill: [240, 160], wood: [200, 140], rocks: [130, 80], lake: [180, 110], marsh: [160, 100], crater: [70, 56], generator: [340, 220], landing: [220, 220], cacti: [170, 120], crystal: [120, 100], cathedral: [280, 150], building: { block: [110, 70], tri: [100, 90], hex: [90, 80], hex3: [140, 130] }[variant] || [100, 100] }[type]; t = { id: uid(), type, variant, x, y, w: S[0], h: S[1], rot: 0, seed: randSeed(), levels: 2, density: 1 }; }
@@ -1619,7 +1630,7 @@ function place(tool, p) {
     doc.annos.push(a); s = { k: 'anno', id: a.id };
   }
   ui.sel = s ? [s] : [];
-  if (tool === 'callout' || tool === 'text' || tool === 'terrain') setTool('select', true);
+  if (tool === 'callout' || tool === 'text') setTool('select', true);   // terrain stays active to place many pieces in a row
   renderPanel(); render();
   if (tool === 'callout' || tool === 'text') { const ta = $('#f-text'); if (ta) { ta.focus(); ta.select(); } }
 }
@@ -1669,6 +1680,7 @@ svg.addEventListener('pointerdown', e => {
     render();
   } else if (ui.tool === 'arrow') ui.drag = { type: 'newarrow', start: p, cur: p };
   else if (ui.tool === 'fire') { const u = unitAt(p), st = u && stateAt(u, ui.cur); ui.drag = { type: 'newshot', start: st ? { x: st.x, y: st.y } : p, from: u ? u.id : null, cur: p }; }
+  else if (ui.tool === 'terrain' && AREA_TYPES.has(ui.terrainType)) ui.drag = { type: 'lasso', pts: [[p.x, p.y]] };
   else if (ui.tool === 'effect' && ui.effectType === 'magic') ui.drag = { type: 'draw', pts: [[p.x, p.y]] };
   else { place(ui.tool, p); return; }
   svg.setPointerCapture(e.pointerId);
@@ -1687,6 +1699,7 @@ svg.addEventListener('pointermove', e => {
     if (!d.pushed) { pushHistory(); d.pushed = true; }
     applyHandle(d.h, p, e); render();
   } else if (d.type === 'rubber' || d.type === 'newarrow' || d.type === 'newshot') { d.cur = p; render(); }
+  else if (d.type === 'lasso') { const l = d.pts[d.pts.length - 1]; if (Math.hypot(p.x - l[0], p.y - l[1]) * ui.zoom > 5) { d.pts.push([p.x, p.y]); skel.ovG.innerHTML = overlaySVG(); } }
   else if (d.type === 'draw') { const l = d.pts[d.pts.length - 1]; if (Math.hypot(p.x - l[0], p.y - l[1]) * ui.zoom > 4) { d.pts.push([p.x, p.y]); render(); } }
 });
 function endDrag(e) {
@@ -1706,6 +1719,11 @@ function endDrag(e) {
     pushHistory();
     const a = { id: uid(), type: 'shot', round: rid(ui.cur), kind: ui.shotKind, x1: Math.round(d.start.x), y1: Math.round(d.start.y), x2: Math.round(x2), y2: Math.round(y2), from: d.from, to: tu ? tu.id : null, width: 1, impact: true, seed: randSeed() };
     doc.annos.push(a); ui.sel = [{ k: 'anno', id: a.id }]; renderPanel();
+  } else if (d.type === 'lasso') {
+    const xs = d.pts.map(q => q[0]), ys = d.pts.map(q => q[1]);
+    if (Math.max(...xs) - Math.min(...xs) < 20 && Math.max(...ys) - Math.min(...ys) < 20) place('terrain', { x: d.pts[0][0], y: d.pts[0][1] });   // a click: default patch
+    else placeArea(d.pts);
+    return;
   } else if (d.type === 'draw') {
     let pts = rdp(d.pts, 2.5).map(q => [Math.round(q[0]), Math.round(q[1])]);
     const len = pts.reduce((t, q, i) => i ? t + Math.hypot(q[0] - pts[i - 1][0], q[1] - pts[i - 1][1]) : 0, 0);
